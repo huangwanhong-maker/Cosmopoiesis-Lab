@@ -1,0 +1,35 @@
+# Build outputs
+build/
+out/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.pdb
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Data and runs: datasets come through the infrastructure's data library into its cache,
+# and the engine's runs are kept there too; nothing of either is committed
+cache/
+
+# The preliminary design of 2026-10-28, background only (decision 0001); not part of the repository
+preliminary_design.zip
+
+# Editors and operating systems
+.vs/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

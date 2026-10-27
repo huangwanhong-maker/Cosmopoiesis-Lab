@@ -1,233 +1,78 @@
-# Cosmic Worlds Lab
+# Cosmopoiesis
 
-**Geometric Reconstruction, Physical Dynamics, and Embodied Agency**
+*Status: seed (2026-10-28): the design is written; no code yet. Serves: research, learning and use. Draws on: the foundations physis, morphe, calx and tyche; the domains metrology, astronomy, geodesy, geophysics, geography, oceanography, meteorology and climate, and planetary science when it is founded; the data library, the visualization layer and the API, through its C++ engine.* A work of [The Science Infrastructures](https://github.com/huangwanhong-maker/The-Science-Infrastructures), in a repository of its own attached as the submodule `applications/cosmopoiesis-lab`; founded by its decision [0001](development/decisions/0001-the-founding-of-cosmopoiesis.md).
 
-> An open, extensible research framework for constructing and simulating physically grounded worlds and the agents that inhabit, explore, and transform them.
+Cosmopoiesis constructs heterogeneous physical worlds and simulates them with the agents that inhabit them: a lunar patch under the Sun of a given date with a rover on it, an ocean basin with a submersible in its currents, ocean and atmosphere exchanging momentum and heat at the sea surface, the Solar System seeded from the JPL ephemeris, the flow of the nearby galaxies, and worlds whose space is itself the sample of a field theory. The same formalism describes all of them, and the same engine runs them.
 
-**Status:** Concept and architecture design. The framework described below is a research direction, not a claim of existing software functionality.
+## 1. Concepts
 
-## Vision
+- **A world is a field configuration on a space with a geometry.** Its carrier is a manifold with a metric (flat space, a sphere, an ellipsoid, an exact spacetime of general relativity), cut into regions that meet at interfaces: the ocean, the air above it, the rock beneath. Its fields are sections of bundles with units (temperatures, fluxes, velocities, stresses, connections, material labels, the states of bodies), and they form a sheaf: fields on the regions whose traces match on the interfaces are one field on the world ([formalism §3](docs/formalism.md)).
+- **Laws are actions and balance laws.** Where there is an action, its stationary points are the equations and Noether's charges are the invariants a run watches; where matter dissipates, a balance law $\partial_tu+dJ=s$ closes by a constitutive relation; collisions, switching and sampling are the jumps of hybrid systems ([formalism §5](docs/formalism.md)).
+- **Coupling is a fibre product, and conservation across an interface is exact.** Each region's model is an open system with ports; a world is the fibre product of its regions over their interfaces. On a cell complex the flux through a shared interface is one cochain counted with opposite signs on its two sides, so what leaves one region enters the other to rounding, and the balance residual of a run is a check of the construction, not a tolerance ([formalism §5.4–5.6](docs/formalism.md)).
+- **Discretisation keeps the structure.** Fields are cochains on morphe's complexes; $d\circ d=0$ and Stokes's theorem hold exactly (physis's discrete exterior calculus); the Helmholtz projection of a flow is the Hodge decomposition; a remeshing commutes with $d$ and loses nothing of a conserved total ([formalism §3.4, §6.3](docs/formalism.md)).
+- **Shapes are equations.** Bodies are semi-algebraic sets, figures of planets are quadrics, gravity fields are expansions in the harmonic polynomials that carry the representations of $SO(3)$, and the configuration space of a mechanism is a real algebraic variety whose dimension is its degrees of freedom and whose singular locus is its kinematic singularities ([formalism §7](docs/formalism.md)).
+- **Observables are invariants, and controllers see readings.** A sensor reads an invariant of the world, with noise, latency and a clock; a controller acts on the readings delivered to it and on its own memory and beliefs, never on the fields themselves unless an experiment says so; its estimates are distinct from the scenario's parameters ([formalism §6.2, §8](docs/formalism.md)).
+- **Scales are a chain of embeddings.** A patch is embedded in the Moon, the Moon in the Solar System, the Solar System in the Local Volume, each world keeping positions in its own frame and the chain carrying the offsets, with a precision budget that says why ([formalism §10](docs/formalism.md)).
+- **The space may be generated.** A carrier can be the sample of a group field theory, a random quadrangulation, a melonic graph or a causal set, from physis, with a world put on it ([formalism §11](docs/formalism.md)).
+- **Evidence, reconstruction, model and display are four channels** that never silently substitute for one another; a query where there is no value says so, never zero. The data library's provenance is the evidence store ([formalism §9](docs/formalism.md)).
 
-Cosmic Worlds Lab explores how to construct computational representations of **bounded physical worlds**—from ocean basins and planetary atmospheres to lunar landscapes and hypothetical environments—and simulate their evolution together with embodied physical agents.
+## 2. What It Will Show
 
-The project's cosmic scope concerns the *diversity of physical worlds that may be investigated*, **not** a claim to simulate the entire universe or to derive all of physics from first principles.
+The page, when it exists ([architecture §7](docs/architecture.md)), has six views: **World** (the composed world in the round, from the galaxy to the rover with floating origins), **Fields** (cochains on the cellulation, the Hodge decomposition of a flow, the four channels side by side), **Dynamics** (a run's invariants, residuals and events against the closed forms), **Agents** (readings as delivered, the controller's beliefs beside the truth, commands and exchanges), **Experiment** (the world, scenario, plan and evaluation as editable documents, with the manifest's commits and retrievals) and **Generation** (a generated carrier with a world on it). Its colour is terracotta, provisionally; serif type; day and night.
 
-Our approach begins with **3D reconstruction, geometry, heterogeneous coordinate systems, and physically defined fields**. We then formulate **structured dynamical models**, such as conservation-law-based PDEs, material constitutive relations, and coupled mechanical systems, subject to explicit constraints and boundary conditions. Adaptive control, system identification, and evolutionary experimentation can be introduced *on top of* this physical foundation.
+## 3. Running
 
-The goal is a reusable scientific environment, not a single-purpose lunar, ocean, atmospheric, or robotics simulator.
+Nothing runs yet. When the first slice is written, from the infrastructure's root:
 
-## Research objectives
-
-1. **Reconstruct and compose worlds.** Combine measured geometry, procedural structure, material regions, and physical boundaries while retaining provenance and uncertainty.
-2. **Represent geometry faithfully.** Support multiple coordinate charts, reference frames, metric structures, moving bodies, and transformations between local and planetary-scale descriptions.
-3. **Define heterogeneous physical fields.** Represent scalar, vector, tensor, and other typed state variables on the domains where they are physically meaningful.
-4. **Evolve systems through structured dynamics.** Use appropriate equations and numerical methods for fluids, solids, granular media, heat transfer, radiation, and other processes.
-5. **Couple distinct physical domains.** Exchange mass, momentum, energy, and other quantities consistently across models, spatial scales, and computational meshes.
-6. **Embed physical agents.** Model bodies, joints, actuators, sensors, computing resources, power systems, and environment-dependent behavior.
-7. **Study adaptation and evolution.** Support physically constrained parameter estimation, system identification, adaptive control, design optimization, and cooperative agent behavior.
-8. **Make results reproducible and testable.** Distinguish observed data, modeled assumptions, numerical approximations, and simulation outcomes.
-
-## Scientific approach
-
-### 1. Reconstruct a world
-
-Build a geometric and material description from some combination of:
-
-- Terrain and bathymetric elevation models;
-- Planetary and environmental observations;
-- Meshes, point clouds, and analytic surfaces;
-- Procedurally generated detail, explicitly distinguished from measured geometry;
-- Solid, liquid, gaseous, granular, and other material regions;
-- Static, deformable, and moving boundaries.
-
-Reconstruction and physical evolution are distinct processes: the initial geometry may be measured or synthesized, but subsequent deformation and motion are governed by the configured dynamics.
-
-### 2. Establish geometry and coordinates
-
-Use a spatial domain or manifold \(M\), possibly assembled from regions with different geometric and computational representations. A coordinate atlas \(\{(U_i,\varphi_i)\}\) enables descriptions in different charts, while explicit reference-frame transformations support inertial, planet-fixed, local, and body-fixed frames.
-
-**Coordinate charts are not computational meshes.** Fields and physical laws should retain their meaning as coordinate systems and mesh resolutions change, to the extent permitted by the mathematical models and numerical transfers.
-
-### 3. Define fields and physical states
-
-Examples include density \(\rho\), temperature \(T\), pressure \(p\), velocity \(\mathbf{v}\), composition, stress, and radiation. Different fields may belong to different spatial domains and have different mathematical types.
-
-A composite state can be written schematically as
-
-\[
-\Phi(t) = (\Phi_1(t),\ldots,\Phi_n(t)),
-\]
-
-with additional finite-dimensional, discrete, or hybrid states for robots, material phases, controllers, and events. We do **not** assume all physically relevant states are ordinary vector fields.
-
-### 4. Specify constrained dynamics
-
-For each domain \(i\), define an appropriate structured model and its constraints:
-
-\[
-\mathcal D_i[\Phi_i;\theta_i,g_i] = 0,
-\qquad
-\mathcal C_i(\Phi_i) = 0,
-\qquad
-\mathcal B_{ij}(\Phi_i,\Phi_j) = 0.
-\]
-
-Here, \(\mathcal D_i\) denotes a dynamical formulation, \(\theta_i\) material or other parameters, \(g_i\) geometric structures, \(\mathcal C_i\) internal constraints, and \(\mathcal B_{ij}\) interactions or interface conditions between domains. The expressions are an architectural abstraction, not a single universal governing equation.
-
-Possible formulations include:
-
-- Conservation-law-based PDEs for fluids and transport;
-- Rigid-body and articulated multibody dynamics;
-- Continuum solid mechanics and granular-contact models;
-- Thermodynamic, radiative, chemical, and phase-change processes;
-- Coupled differential–algebraic systems and discrete events when needed.
-
-Numerical schemes must be selected for the intended physical regime and validated at the relevant scales. We favor interpretable, physically grounded models over unrestricted black-box world prediction.
-
-### 5. Couple dynamics across domains
-
-A single world can contain heterogeneous coupled processes, such as:
-
-- Atmosphere ↔ ocean: stress, heat, and mass exchange;
-- Water ↔ vehicle: buoyancy, drag, and fluid–structure interaction;
-- Regolith ↔ rover: contact, slip, sinkage, and terrain deformation;
-- Sunlight ↔ surface ↔ robot: illumination, radiation, thermal balance, and energy supply;
-- Agents ↔ environment: observation, actuation, construction, and disturbance.
-
-Coupling interfaces should describe exchanged quantities, frames, units, time steps, boundary conditions, and numerical consistency. Conservation and stability need explicit tests.
-
-### 6. Introduce embodied agents and adaptation
-
-Agents have physical embodiment and internal control states. They interact with the simulated world through **sensors and actuators**, not through privileged access to simulator ground truth.
-
-Adaptation is layered on top of the physical simulation and may include:
-
-- Online estimation of uncertain environmental parameters;
-- System identification and competing physical-model comparison;
-- Adaptive and model-predictive control;
-- Evolutionary optimization of robot morphology or control policies;
-- Multi-agent cooperation and environmental modification.
-
-Learning may improve estimates or controllers, but is **not** the foundational substitute for physical dynamics. Uncertainty, observability, and model validity should remain explicit.
-
-## Conceptual architecture
-
-```text
-Cosmic Worlds Lab
-│
-├── Geometry & Reconstruction
-│   ├── 3D data, surfaces, meshes, domains
-│   ├── Coordinate atlases and reference frames
-│   └── Moving geometry and boundaries
-│
-├── Matter & Fields
-│   ├── Material properties and constitutive laws
-│   └── Typed scalar, vector, tensor, and hybrid states
-│
-├── Dynamics & Constraints
-│   ├── Conservation laws, PDEs, ODEs, and DAEs
-│   ├── Physical constraints and boundary conditions
-│   └── Replaceable, validated numerical methods
-│
-├── Coupling & Simulation Kernel
-│   ├── Cross-domain exchanges and interfaces
-│   ├── Multiscale spatial and temporal coordination
-│   └── State management, events, logging, reproducibility
-│
-├── Embodied Agents
-│   ├── Bodies, mechanisms, sensors, actuators
-│   ├── Observation and control interfaces
-│   └── Energy and communication systems
-│
-├── Adaptation & Evolution
-│   ├── Parameter and model identification
-│   ├── Adaptive and evolutionary control
-│   └── Cooperative and environment-modifying agents
-│
-└── Worlds, Experiments & Validation
-    ├── Oceanic environments
-    ├── Lunar and planetary surfaces
-    ├── Planetary atmospheres and mixed domains
-    └── Benchmarks, uncertainty, and scientific comparison
+```
+python data/acquisition/recipe.py applications/cosmopoiesis-lab/recipe.json
+python applications/cosmopoiesis-lab/serve.py --open
 ```
 
-This is a **conceptual architecture**, not yet an implemented directory structure or API specification.
+will build the engine (g++ 11 or later, natively or in WSL) and fetch the data, and open the page at http://127.0.0.1:8930/.
 
-## Example worlds and experiments
+## 4. The Design
 
-| Scenario | Reusable physical foundations | Possible agents or experiments |
-| --- | --- | --- |
-| Lunar surface | 3D terrain, low gravity, vacuum, regolith, radiation, thermal exchange | Rover mobility, energy-aware exploration, soil interaction |
-| Earth ocean | Bathymetry, seawater properties, currents, pressure, waves, seafloor | Autonomous marine vehicles, sonar navigation, coordinated observation |
-| Martian environment | Terrain, gravity, thin atmosphere, dust, solar/thermal forcing | Surface rover and aerial-robot studies |
-| Ice-covered ocean world | Ice, liquid region, pressure, thermodynamics, uncertain boundaries | Subsurface robotic exploration in hypothetical scenarios |
-| Laboratory world | Controlled fluid or solid geometry with measured parameters | Verification and comparison with physical experiments |
+| Read | For |
+|---|---|
+| [docs/formalism.md](docs/formalism.md) | What a world is, mathematically: carrier, frames, fields as a sheaf, matter, dynamics, coupling as a fibre product, exact conservation, transformations and gauge, the algebraic geometry of bodies and mechanisms, agents, scenario and evidence, scales, generated carriers; eleven propositions with their proofs and their checks |
+| [docs/architecture.md](docs/architecture.md) | The place of the work in the infrastructure: what it owns, what it asks of each foundation and domain, the engine and its protocol, World JSON, the data, the page, plug-ins, the slices by which it is built, open decisions; and a critique of the preliminary design |
+| [development/decisions/0001](development/decisions/0001-the-founding-of-cosmopoiesis.md) | Why it is designed so, and what was decided |
+| [CLAUDE.md](CLAUDE.md) | The rules for working here |
 
-These cases are intended to reuse infrastructure while allowing **different governing approximations, parameters, and validation standards**. No planetary setting is assumed to be completely known.
+## 5. Where Things Go
 
-## Guiding principles
+Cosmopoiesis owns the composition and nothing general: the description of a world (World, Agent and Experiment JSON), the runtime that advances a composed world as a task graph with trial and commit, the records of runs, the engine, the server and the page. What names no object in nature goes to a foundation (rigid bodies, balance laws and their closures, the gluing of complexes, filters) and is used from there; what names an object (the Moon's gravity, seawater, the Earth's rotation) comes from a domain. The table of who owns what, and what each slice asks the foundations to gain first, is [architecture §3 and §9](docs/architecture.md).
 
-- **Physics first:** Explicit laws, material models, and stated approximations before learned dynamics.
-- **Geometry first:** Physical space and coordinate transforms are foundational, not rendering conveniences.
-- **Modularity:** A world is composed of domains, fields, processes, interactions, and agents.
-- **No privileged environment:** Oceans, atmospheres, lunar terrain, and artificial environments are configurations, not separate foundations.
-- **Heterogeneity by design:** Different regions may use different equations, numerical solvers, meshes, and time scales.
-- **Conservation and admissibility:** Constraints must be specified, enforced appropriately, and tested.
-- **Separate reality, model, and observation:** Keep source measurements, model assumptions, numerical state, and agent observations distinguishable.
-- **Evidence-aware fidelity:** Increase physical detail where research questions and validation support it.
-- **Adaptive agency:** Learning and evolution should improve action and model calibration while remaining interpretable and constrained.
-- **Open science:** Favor reproducible configurations, transparent assumptions, explicit provenance, and interoperable formats.
+## 6. The Slices
 
-## Research and development roadmap
+| Slice | World | First check |
+|---|---|---|
+| 0 | a thermal box, two frames | the sine mode of the heat equation at second order; the energy balance exact |
+| 1 | two bodies glued on a face, unequal steps | the interface residual zero to rounding; a transfer that keeps its total |
+| 2 | a lunar patch from LOLA, the Sun from DE440, a lander and a rover | free fall; the Sun's elevation against the Celestial Atlas; $J_2$; causality of the controller |
+| 3 | a marine basin over the bathymetry, a submersible | hydrostatics; Archimedes; the harmonic flows round the islands |
+| 4 | ocean and atmosphere glued at the sea surface | Williamson's cases; exact conservation; the exchange's residual |
+| 5 | the Solar System and the galaxy flow, a patch in the chain | orbital elements against DE440; the chain's precision |
+| 6 | agents estimating, adapting, cooperating | an estimate converging where identifiable, reported unidentifiable where not |
 
-### Phase 0 — Mathematical and software specification
+## 7. Files
 
-- Define physical domains, coordinate/frame interfaces, field types, and units.
-- Specify the interaction, constraint, and solver interfaces.
-- Establish test cases for coordinate transformations and conservation checks.
+| Path | Content | Status |
+|---|---|---|
+| `README.md`, `CLAUDE.md`, `LICENSE` | This page; the guide for Claude Code; MIT | draft |
+| `docs/formalism.md`, `docs/architecture.md` | The mathematics; the structure | draft |
+| `development/` | Decisions, ideas, release notes | draft |
+| `worlds/`, `agents/`, `experiments/` | World, Agent and Experiment JSON | planned |
+| `engine/`, `CMakeLists.txt`, `engine.py` | The C++ engine, its checks and its builder | planned |
+| `src/`, `index.html`, `styles.css`, `serve.py`, `recipe.json` | The page and its server | planned |
+| `plugins/` | Models, controllers and agents under the API's contract | planned |
+| `tests/` | The checks on the shared harness, with fixtures | planned |
 
-### Phase 1 — Minimal reconstructed world
+## 8. References
 
-- Load or construct a bounded 3D environment.
-- Define a gravity field, simple material surfaces, and time evolution.
-- Simulate a rigid body with collision and basic actuation.
+Those of the [formalism](docs/formalism.md#14-references): Arnold, Falk and Winther (2006) on exterior calculus; Desbrun, Hirani, Leok and Marsden (2005) on its discrete form; Willems (2007), Baez and Pollard (2017) and Fong and Spivak (2019) on interconnection and compositionality; Hairer, Lubich and Wanner (2006) on geometric integration; Goebel, Sanfelice and Teel (2012) on hybrid systems; Bochnak, Coste and Roy (1998), Cox, Little and O'Shea (2015) and Sommese and Wampler (2005) on real and numerical algebraic geometry; Heiskanen and Moritz (1967) on physical geodesy; Archinal et al. (2018) on the rotation of the bodies; the GRAIL and LOLA papers on the Moon.
 
-### Phase 2 — Two contrasting physical environments
+## 9. Licence
 
-- Configure a granular low-gravity surface and a submerged fluid environment.
-- Reuse the core representation while selecting different physical solvers.
-- Verify dynamics against analytic cases and documented benchmarks.
-
-### Phase 3 — Coupled environmental processes
-
-- Add selected thermal, fluid–solid, and granular interactions.
-- Test exchanges across domain interfaces and resolutions.
-- Introduce uncertainty and model-parameter studies.
-
-### Phase 4 — Embodied autonomous agents
-
-- Add sensor models, observation pipelines, controller interfaces, and energy models.
-- Explore adaptive control, system identification, and constrained planning.
-- Compare multiple agents and environmental interventions.
-
-### Phase 5 — Expanded worlds and reproducible research
-
-- Incorporate observational datasets and more complete world configurations.
-- Expand validation suites and multiscale modeling capabilities.
-- Enable comparative studies across planetary and oceanic environments.
-
-Phases express intended research direction rather than delivery promises.
-
-## Project status and participation
-
-**Currently: design stage.** No functioning simulator, stable API, benchmark results, release schedule, or verified physical fidelity is claimed in this README.
-
-Technical design discussions, mathematical critiques, reproducible benchmark proposals, and contributions from computational physics, geometry, oceanography, planetary science, robotics, and scientific computing are welcome once the project infrastructure is established.
-
-## License
-
-This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for the full text. Copyright (c) 2026 Wanhong Huang.
-
----
-
-*Cosmic Worlds Lab — constructing bounded physical worlds to study their dynamics and the agents situated within them.*
+MIT; see [LICENSE](LICENSE). Datasets keep their own licences, recorded in the infrastructure's data registry.
