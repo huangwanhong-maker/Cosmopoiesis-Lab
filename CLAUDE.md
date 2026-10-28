@@ -36,11 +36,11 @@ cosmopoiesis-lab/
 ├── worlds/          World JSON (planned)
 ├── agents/          Agent JSON (planned)
 ├── experiments/     Experiment JSON and the research records (planned)
-├── engine/          the C++ engine, header-only C++20 (planned)
+├── engine/          the C++ engine, header-only C++20 (draft: slice S)
 ├── plugins/         models, controllers and agents under the API's contract (planned)
-├── src/             the page, ES modules without a build step (planned)
-├── tests/           run-tests.mjs on the infrastructure's harness; fixtures/ (planned)
-└── CMakeLists.txt · engine.py · serve.py · recipe.json · index.html · styles.css (planned)
+├── src/             the page, ES modules without a build step (draft: slice S)
+├── tests/           run-tests.mjs on the infrastructure's harness; fixtures/ (draft)
+└── engine.py · serve.py · recipe.json · index.html · styles.css (draft); CMakeLists.txt (planned)
 ```
 
 A directory is created when its first content is written. The layout is architecture §10; change it there and here together.
@@ -58,7 +58,7 @@ A directory is created when its first content is written. The layout is architec
 ## 5. Technology
 
 - **Language.** C++20 for the engine, header-only on the foundations and the domains, in the namespace `cosmopoiesis`; built as the program `cosmopoiesis` by `engine.py` into `data/cache/engines/cosmopoiesis/` (g++ 11 or later, natively or in WSL; stale when a header it includes changes), and as a CMake project whose checks are programs on calx `verification` (`calx_add_check`), adding the foundations from `../../foundations` when no larger project has. The API's JSON (`api/cpp/science/json.hpp`) is its JSON.
-- **The page.** ES modules without a build step; three.js from jsDelivr pinned to 0.170.0; the visualization layer's helpers; Source Serif 4; terracotta (#C97D60) provisionally, day and night. Served by `serve.py` on port **8930** with Python's standard library, mounting `domains/`, `foundations/` and `visualization/` beside the page and the cache at `/data/`, reporting the recipe at `/setup`.
+- **The page.** ES modules without a build step; three.js from jsDelivr pinned to 0.170.0; the visualization layer's helpers; Source Serif 4; pink and purple, the user's (rose and orchid; decision 0003), day and night; a console, with no pop-ups. Served by `serve.py` on port **8930** with Python's standard library, mounting `domains/`, `foundations/` and `visualization/` beside the page and the cache at `/data/`, reporting the recipe at `/setup`.
 - **Data.** Through the infrastructure's data library only: datasets registered with their licences (LOLA, MOLA, GRAIL, EGM2008, GEBCO, Cosmicflows-4 to come), products built by the recipe, never committed.
 - **Plug-ins.** Models, controllers and agents in Python or C++ under the API's contract, each in a process of its own, bounded in time; the classes to be proposed for the API edge.
 - **Licence.** MIT. Check every dependency's licence before adopting it; copyleft never by default.
@@ -78,4 +78,4 @@ Architecture §12: the branch and the submodule's registration; the planetary-sc
 
 ## 8. Current State
 
-As of 2026-10-28: the design only. The formalism (eleven propositions with their checks named), the architecture (what the work owns, what each foundation and domain supplies or must gain, the engine and its protocol, World JSON, the data, the page, the slices), this guide, the founding decision and the licence are written; no code, no checks, no data registered. The preliminary design of the same day (fifteen notes, kept out of the repository and ignored by git) was read in full and is critiqued in architecture §2. The next step is slice 0, the thermal box, beginning with what it asks of morphe and physis (architecture §9).
+As of 2026-10-28: the design, and slice S, the spacetime of the Earth and the Moon ([decision 0002](development/decisions/0002-the-spacetime-slice-first.md); the infrastructure's ADR 0049). The engine (`engine/`: `cosmopoiesis.cpp` with the bindings `spacetime.hpp`, `coordinates.hpp` and `satellites.hpp`) answers nine operations on the domains' C++ (metrology, geodesy, astronomy, the navigation bridge) and physis; `engine.py` builds it and keeps it alive; `serve.py` serves the page, the engine, the data library's terrain tiles and the recipe; the page (`index.html`, `styles.css`, `src/`) draws the Earth and the Moon on the visualization layer's `globe`, with time, places in every coordinate system, frames and their loops, and satellites; `tests/run-tests.mjs` checks the page's logic and the engine's answers. World JSON, the runtime, the engine's CMake checks and the other slices are not yet written; slice 0, the thermal box, is next, beginning with what it asks of morphe and physis (architecture §9).

@@ -1,6 +1,6 @@
 # Cosmopoiesis
 
-*Status: seed (2026-10-28): the design is written; no code yet. Serves: research, learning and use. Draws on: the foundations physis, morphe, calx and tyche; the domains metrology, astronomy, geodesy, geophysics, geography, oceanography, meteorology and climate, and planetary science when it is founded; the data library, the visualization layer and the API, through its C++ engine.* A work of [The Science Infrastructures](https://github.com/huangwanhong-maker/The-Science-Infrastructures), in a repository of its own attached as the submodule `applications/cosmopoiesis-lab`; founded by its decision [0001](development/decisions/0001-the-founding-of-cosmopoiesis.md).
+*Status: draft (2026-10-28): the design is written, and its first slice: the spacetime of the Solar System as one world, addressed from a crater to the Galaxy's centre ([decisions 0002](development/decisions/0002-the-spacetime-slice-first.md) and [0003](development/decisions/0003-one-world-its-addresses-and-a-console.md)), read by instruments, virtual and physical, on a runtime with deadlines ([decision 0004](development/decisions/0004-instruments-and-their-acquisition.md)). Serves: research, learning and use. Draws on: the foundations physis, morphe, calx and tyche; the domains metrology, geodesy, astronomy, geophysics, meteorology and the navigation bridge (and geography, oceanography and climate, and planetary science when it is founded, as the slices reach them); the data library, the visualization layer and the API, through its C++ engine.* A work of [The Science Infrastructures](https://github.com/huangwanhong-maker/The-Science-Infrastructures), in a repository of its own attached as the submodule `applications/cosmopoiesis-lab`; founded by its decision [0001](development/decisions/0001-the-founding-of-cosmopoiesis.md).
 
 Cosmopoiesis constructs heterogeneous physical worlds and simulates them with the agents that inhabit them: a lunar patch under the Sun of a given date with a rover on it, an ocean basin with a submersible in its currents, ocean and atmosphere exchanging momentum and heat at the sea surface, the Solar System seeded from the JPL ephemeris, the flow of the nearby galaxies, and worlds whose space is itself the sample of a field theory. The same formalism describes all of them, and the same engine runs them.
 
@@ -16,38 +16,76 @@ Cosmopoiesis constructs heterogeneous physical worlds and simulates them with th
 - **The space may be generated.** A carrier can be the sample of a group field theory, a random quadrangulation, a melonic graph or a causal set, from physis, with a world put on it ([formalism §11](docs/formalism.md)).
 - **Evidence, reconstruction, model and display are four channels** that never silently substitute for one another; a query where there is no value says so, never zero. The data library's provenance is the evidence store ([formalism §9](docs/formalism.md)).
 
-## 2. What It Will Show
+## 2. What It Shows
 
-The page, when it exists ([architecture §7](docs/architecture.md)), has six views: **World** (the composed world in the round, from the galaxy to the rover with floating origins), **Fields** (cochains on the cellulation, the Hodge decomposition of a flow, the four channels side by side), **Dynamics** (a run's invariants, residuals and events against the closed forms), **Agents** (readings as delivered, the controller's beliefs beside the truth, commands and exchanges), **Experiment** (the world, scenario, plan and evaluation as editable documents, with the manifest's commits and retrievals) and **Generation** (a generated carrier with a world on it). Its colour is terracotta, provisionally; serif type; day and night.
+**One world, its addresses and its instruments** (decisions [0002](development/decisions/0002-the-spacetime-slice-first.md), [0003](development/decisions/0003-one-world-its-addresses-and-a-console.md) and [0004](development/decisions/0004-instruments-and-their-acquisition.md)). The page is a console laid out as a flight deck, over the Solar System at any instant from 1849 to 2150, or now, running at any rate:
+
+- **One world.** The Sun, the planets, Pluto and the Moon, placed and turned by DE440 and the IAU's rotation models, drawn in the barycentric ICRS from the regolith of a crater to 110 au above the ecliptic, with each planet's orbit. The Earth and the Moon have their terrain and imagery, refined as one comes near: ETOPO 2022, Mapzen's Terrarium and LOLA, Sentinel-2's cloudless Earth, the Blue Marble, a day's VIIRS and LRO's Moon, with every height saying where it came from. The other bodies carry their maps, finer close in from NASA's Trek. Saturn has its rings, the sky its stars and the Milky Way. Going to another body is a flight.
+- **Addresses.** Any point is written in one line, `moon(43.31 S, 11.36 W)`, `earth(35.36 N, 138.73 E)/aer(45°, 30°, 10 km)` or `ICRS:equatorial(266.4051°, 28.936175° S, 8.122 kpc) @ 2026-10-28T12:00:00Z`, read by the navigation domain's address language, answered in every frame and chart of the catalogue, and flown to. A name from the gazetteer goes there too, and a syntax error is marked where it is ([formalism §2.5](docs/formalism.md)).
+- **Time.** The instant in every time scale, with the Earth's rotation, on the mission clock that the server holds for every page and instrument.
+- **Frames.** The catalogue as one tree, from the galactocentric frame and the barycentre to a place on the Moon, read as a connection: the holonomies of its loops measure the disagreements of its standards ([formalism §2.6](docs/formalism.md)).
+- **The environment** (ENV), as the observer's instruments read it: the ground, the air with the standard atmosphere's profiles, the Sun and the sky with the GNSS satellites above the horizon, the solar wind, the interplanetary field, the $K$ index, the Sun's X-rays and energetic protons, the geomagnetic field and gravity.
+- **The data** (BUS): every reading as it arrives, coloured by its provenance: observed in rose, modelled in blue, assimilated in amber, with glyphs for archive and synthetic ([formalism §8.5](docs/formalism.md)).
+- **Instruments** (INSTR): the mounted sensors with their kernels, coverage and counters; a family mounted on the observer, the ISS or any address ([docs/instruments.md](docs/instruments.md)).
+- **Scheduling** (SCHED): the policy, the admission of the declared set, the jobs on each worker as they ran, the servers, and each policy simulated on the declared set ([formalism §8.6](docs/formalism.md)).
+- **Satellites.** CelesTrak's groups by SGP4, lit or eclipsed, with orbits, ground tracks and look angles.
+
+**Later** ([architecture §7](docs/architecture.md)), six views: **World** (the composed world in the round, from the galaxy to the rover with floating origins), **Fields** (cochains on the cellulation, the Hodge decomposition of a flow, the four channels side by side), **Dynamics** (a run's invariants, residuals and events against the closed forms), **Agents** (readings as delivered, the controller's beliefs beside the truth, commands and exchanges), **Experiment** (the world, scenario, plan and evaluation as editable documents) and **Generation** (a generated carrier with a world on it). The globe of this slice is the World view's first form.
+
+Its colours are pink and purple, rose and orchid on a plum night and on lilac paper by day ([decision 0003](development/decisions/0003-one-world-its-addresses-and-a-console.md) §2.3); serif type; no pop-ups: messages go to a log and light a lamp.
 
 ## 3. Running
 
-Nothing runs yet. When the first slice is written, from the infrastructure's root:
+From the infrastructure's root:
 
 ```
 python data/acquisition/recipe.py applications/cosmopoiesis-lab/recipe.json
 python applications/cosmopoiesis-lab/serve.py --open
 ```
 
-will build the engine (g++ 11 or later, natively or in WSL) and fetch the data, and open the page at http://127.0.0.1:8930/.
+The first command builds the engine (g++ 11 or later, natively or in WSL) and fetches the data, about 250 MB with the coarse terrain; the finer terrain is fetched as the page asks for it, and kept. The second opens the page at http://127.0.0.1:8930/; the SYS page can also run the recipe. The Earth's orientation, the leap seconds and the satellites' elements change: running their steps again refreshes them (the page's "fetch fresh elements" does so for the satellites).
 
 ## 4. The Design
 
 | Read | For |
 |---|---|
-| [docs/formalism.md](docs/formalism.md) | What a world is, mathematically: carrier, frames, fields as a sheaf, matter, dynamics, coupling as a fibre product, exact conservation, transformations and gauge, the algebraic geometry of bodies and mechanisms, agents, scenario and evidence, scales, generated carriers; eleven propositions with their proofs and their checks |
+| [docs/formalism.md](docs/formalism.md) | What a world is, mathematically: carrier, frames, events and their addresses, frames as a connection, fields as a sheaf, the kinds of phenomena, matter, dynamics, coupling as a fibre product, exact conservation, transformations and gauge, the algebraic geometry of bodies and mechanisms, agents, instruments and the timing of their acquisition, scenario and evidence, scales, generated carriers; the propositions with their proofs and their checks |
+| [docs/instruments.md](docs/instruments.md) | What an instrument is: the twelve kernels of observation, the encyclopedia of instruments mapped onto them, and a critique of it |
 | [docs/architecture.md](docs/architecture.md) | The place of the work in the infrastructure: what it owns, what it asks of each foundation and domain, the engine and its protocol, World JSON, the data, the page, plug-ins, the slices by which it is built, open decisions; and a critique of the preliminary design |
-| [development/decisions/0001](development/decisions/0001-the-founding-of-cosmopoiesis.md) | Why it is designed so, and what was decided |
+| [development/decisions/](development/decisions/) | Why it is designed so, and what was decided: the founding (0001), the spacetime slice (0002), one world and its console (0003), instruments and their acquisition (0004) |
 | [CLAUDE.md](CLAUDE.md) | The rules for working here |
 
-## 5. Where Things Go
+## 5. The Engine and the Server
+
+The engine (`engine/cosmopoiesis.cpp`, header-only C++20 in the namespace `cosmopoiesis`) composes the domains and writes none of their science. It reads one request in JSON and writes one answer; with `--serve` it reads a request per line and keeps its kernels between them, which is how the server runs it (`engine.py`). Every value is named with its unit (`_m`, `_s`, `_deg`, `_rad`, `_arcsec`, `_mas`) and every position with its frame. Times are text: ISO 8601 with `Z` or a scale, `JD …` or `MJD …` with a scale, or `unix:<seconds>` for UTC from a clock. The server adds the world's sources (the ephemeris, the Moon's PCK, the IERS's series, the leap seconds, the geoid), so that a request names none of its paths.
+
+| Request | Answer |
+|---|---|
+| `{"op": "status"}` | the ephemeris and its coverage, the Moon's frames, the Earth's orientation and its span, the leap seconds and their expiry |
+| `{"op": "time", "time"}` | the instant in every scale, with UT1's source, ΔT, TDB − TT, the ERA, GMST (2006 and 1982), GAST, the EOP and the GPS week |
+| `{"op": "frames"}` | the catalogue's frames (each with its parent and what it is) and its relations |
+| `{"op": "bodies", "start", "span", "step", "bodies"?}` | samples of every body's position and velocity in the ICRS and of its orientation (a quaternion from its fixed frame to the ICRS), with its radius, GM and frames, for the page to interpolate |
+| `{"op": "ephemeris", "start", "span", "step"}` | the same for the Earth, the Moon and the Sun in the GCRS (slice S's form) |
+| `{"op": "address", "text", "time"?, "answers"?, "observer"?, "charts"?}` | an address read, canonically printed and resolved to an event, answered in every frame and chart (or in those asked), seen from an observer (AER, ENU, NED); a syntax error with its column and what was expected; the grammar and every frame's charts |
+| `{"op": "transform", "from", "to", "time", "positions", "velocities"?}` | the motion between two frames, its path through the tree, and the points carried |
+| `{"op": "holonomy", "time"}` | the holonomy of every loop of the catalogue: angle and slide |
+| `{"op": "convert", "time", "point", "observer"?}` | a point given geodetically, in Cartesian coordinates of any frame, in UTM, UPS or MGRS, on the Earth or the Moon, in every system (§2, Place) |
+| `{"op": "geodesic", "from", "to", "points"?}` | the geodesic on WGS 84: distance, azimuths, the path |
+| `{"op": "satellites", "time", "groups", "observer"?, "window"?}` | the satellites of CelesTrak's groups by SGP4: TEME, GCRS and ITRS states, sub-point, shadow, the age of the elements, look angles from the observer, and a window of samples |
+| `{"op": "instruments"}` | the kernels of observation, the engine's instrument families and the provenances |
+| `{"op": "acquire.configure" \| "acquire.step" \| "acquire.describe" \| "acquire.analyse", "session", …}` | an acquisition session: its sensors, servers and policy; one step of releases, admission and dispatch with the readings, the trace and the plan of external jobs; its state with every sensor's counters; a simulation of its declared set under each policy |
+
+The server (`serve.py`, Python's standard library) serves the page, the shared code and the data cache. It runs the engine (`GET` and `POST /api/engine`), lists the satellites' groups (`/api/satellites`), and builds terrain tiles with the data library's `tiles` (`/tiles/terrain/<body>/<z>/<x>/<y>`, and `?synthetic=1` for the labelled detail). It reports and runs the recipe (`/setup`, `/setup/run`). It holds the mission clock (`/api/clock`: set, rate, play, pause, present) and the acquisition (`runtime.py`): the engine's session stepped four times a second, the physical sources run by its I/O workers (NTP, SWPC's solar wind, interplanetary field and $K$ index, GOES's X-rays and protons, USGS's earthquakes, the user's stations, the terrain), and the readings on a bus read by long polls (`/api/bus`, `/api/bus/latest`), with the session's state, trace and analysis (`/api/acquisition`, `/api/acquisition/trace`, `/api/acquisition/analyse`) and the instruments (`/api/instruments`). Only 127.0.0.1 is bound unless `--host` says otherwise; on a public address the recipe and changes to the acquisition need the server's token, and requests are held within smaller limits.
+
+## 6. Where Things Go
 
 Cosmopoiesis owns the composition and nothing general: the description of a world (World, Agent and Experiment JSON), the runtime that advances a composed world as a task graph with trial and commit, the records of runs, the engine, the server and the page. What names no object in nature goes to a foundation (rigid bodies, balance laws and their closures, the gluing of complexes, filters) and is used from there; what names an object (the Moon's gravity, seawater, the Earth's rotation) comes from a domain. The table of who owns what, and what each slice asks the foundations to gain first, is [architecture §3 and §9](docs/architecture.md).
 
-## 6. The Slices
+## 7. The Slices
 
 | Slice | World | First check |
 |---|---|---|
+| S | the spacetime of the Solar System as one world: its frames, figures and bodies at any instant, addresses in every frame and chart, satellites, instruments and their acquisition, a console (done, decisions 0002–0004) | SOFA's and ERFA's values, Horizons, NAIF's example, GeographicLib, PROJ, GEOTRANS, Vallado's verification set, astropy's galactocentric frame, WMM2025's report and NOAA's test values, the 1976 standard atmosphere, in the domains' and the work's checks; readings that do not depend on the schedule |
 | 0 | a thermal box, two frames | the sine mode of the heat equation at second order; the energy balance exact |
 | 1 | two bodies glued on a face, unequal steps | the interface residual zero to rounding; a transfer that keeps its total |
 | 2 | a lunar patch from LOLA, the Sun from DE440, a lander and a rover | free fall; the Sun's elevation against the Celestial Atlas; $J_2$; causality of the controller |
@@ -56,23 +94,24 @@ Cosmopoiesis owns the composition and nothing general: the description of a worl
 | 5 | the Solar System and the galaxy flow, a patch in the chain | orbital elements against DE440; the chain's precision |
 | 6 | agents estimating, adapting, cooperating | an estimate converging where identifiable, reported unidentifiable where not |
 
-## 7. Files
+## 8. Files
 
 | Path | Content | Status |
 |---|---|---|
 | `README.md`, `CLAUDE.md`, `LICENSE` | This page; the guide for Claude Code; MIT | draft |
-| `docs/formalism.md`, `docs/architecture.md` | The mathematics; the structure | draft |
+| `docs/formalism.md`, `docs/architecture.md`, `docs/instruments.md` | The mathematics; the structure; the instruments | draft |
 | `development/` | Decisions, ideas, release notes | draft |
 | `worlds/`, `agents/`, `experiments/` | World, Agent and Experiment JSON | planned |
-| `engine/`, `CMakeLists.txt`, `engine.py` | The C++ engine, its checks and its builder | planned |
-| `src/`, `index.html`, `styles.css`, `serve.py`, `recipe.json` | The page and its server | planned |
+| `engine/`, `engine.py` | The C++ engine (`cosmopoiesis.cpp`; the bindings `spacetime.hpp`, `coordinates.hpp`, `satellites.hpp`; observation `observation.hpp`, the instruments `instruments.hpp` and `environment.hpp`, the acquisition session `acquisition.hpp`) and its builder | draft |
+| `CMakeLists.txt` | The engine's own checks on calx's verification | planned |
+| `src/`, `index.html`, `styles.css`, `serve.py`, `runtime.py`, `recipe.json` | The page: the console (`console.js`, `charts.js`, the pages in `pages/`), the world (`world.js`, `scene.js`, `navigator.js`, `maps.js`, `satellites.js`, `labels.js`, `places.js`), the mission clock's view (`clock.js`), the bus (`busclient.js`), `format.js`, `api.js`, `app.js`; its server, the server's runtime (the mission clock, the bus, the physical sources, the acquisition) and its recipe | draft |
 | `plugins/` | Models, controllers and agents under the API's contract | planned |
-| `tests/` | The checks on the shared harness, with fixtures | planned |
+| `tests/` | The checks on the shared harness: the formats, the clock, the search, the interpolated windows, the recipe, and the engine's answers; `check_runtime.py`, the server's runtime and an acquisition session | draft |
 
-## 8. References
+## 9. References
 
 Those of the [formalism](docs/formalism.md#14-references): Arnold, Falk and Winther (2006) on exterior calculus; Desbrun, Hirani, Leok and Marsden (2005) on its discrete form; Willems (2007), Baez and Pollard (2017) and Fong and Spivak (2019) on interconnection and compositionality; Hairer, Lubich and Wanner (2006) on geometric integration; Goebel, Sanfelice and Teel (2012) on hybrid systems; Bochnak, Coste and Roy (1998), Cox, Little and O'Shea (2015) and Sommese and Wampler (2005) on real and numerical algebraic geometry; Heiskanen and Moritz (1967) on physical geodesy; Archinal et al. (2018) on the rotation of the bodies; the GRAIL and LOLA papers on the Moon.
 
-## 9. Licence
+## 10. Licence
 
 MIT; see [LICENSE](LICENSE). Datasets keep their own licences, recorded in the infrastructure's data registry.

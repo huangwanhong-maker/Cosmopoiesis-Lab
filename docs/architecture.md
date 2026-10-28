@@ -180,6 +180,10 @@ One JSON request on the standard input, one JSON answer on the standard output, 
 | `{"op": "sample", "run", "snapshot", "channel", "queries": [{"field", "frame", "points" or "footprint"}]}` | values with their units, or why there is none (outside the support, undefined in the material, no evidence); never a zero for a missing value |
 | `{"op": "invariants", "run"}` | the invariants and interface residuals over the run |
 | `{"op": "verify", "model", "case"}` | a model's verification case against its closed form: the errors and the measured order |
+| `{"op": "status" \| "time" \| "frames" \| "ephemeris" \| "bodies" \| "transform" \| "holonomy" \| "convert" \| "address" \| "geodesic" \| "satellites", …}` | the spacetime of slice S: the world's sources, an instant in every scale, the catalogue of frames, sampled motions of the bodies, transformations, loops' holonomies, a point in every coordinate system, addresses read and answered in every frame and chart, geodesics, satellites (the README, §5) |
+| `{"op": "instruments" \| "acquire.configure" \| "acquire.step" \| "acquire.describe" \| "acquire.analyse", …}` | the kernels and families of instruments; an acquisition session configured, stepped, described and simulated (decision 0004) |
+
+With `--serve` the engine reads a request per line and keeps what it has read between them; the server keeps it so for the spacetime's operations, and will still run `run` as a job of its own process.
 
 The server runs `run` as a job: one engine process per run, its progress followed, cancellable, the answers of `sample` served from the run's snapshots. On a public address, runs need the server's token and are held within smaller limits.
 
@@ -256,7 +260,7 @@ The page draws with the visualization layer and adds nothing general of its own:
 
 ### 7.3 Style
 
-Warm and humane, serif type (Source Serif 4), day and night. Its colour is **terracotta** (#C97D60), the colour of a fired world, on a pale clay paper by day and on a night the colour of basalt, provisionally, until the user chooses; its data in perceptually uniform maps, validated for colour vision deficiencies.
+A console laid out as a flight deck (decision [0003](../development/decisions/0003-one-world-its-addresses-and-a-console.md)): a glareshield of clocks and annunciator lamps, multifunction displays with pages chosen by keys, a control and display unit, a status line; no pop-ups, messages to a log and a lamp. Serif type (Source Serif 4), day and night. Its colours are **pink and purple**, the user's: rose (#EE8FBD) and orchid (#B892DD) on a plum night, a deeper rose (#C2477F) and orchid (#7D54AB) on lilac paper by day; its data in colours validated for colour vision deficiencies, the provenance of readings in three hues with glyphs, the status colours reserved.
 
 ### 7.4 The Server
 
@@ -272,6 +276,7 @@ Each slice is a world that runs end to end and is checked against a closed form;
 
 | Slice | World | Needs | Checks |
 |---|---|---|---|
+| **S. The spacetime of the Solar System** (done; decisions [0002](../development/decisions/0002-the-spacetime-slice-first.md), [0003](../development/decisions/0003-one-world-its-addresses-and-a-console.md), [0004](../development/decisions/0004-instruments-and-their-acquisition.md)) | every body of DE440 at any instant from 1849 to 2150 in one world, the Earth and the Moon with their terrain, placed and turned by DE440, IAU 2006/2000A and the IERS; addresses in every frame and chart, to the Galaxy's centre; satellites by SGP4; instruments, virtual and physical, on a runtime with deadlines; a console | physis `geometry` and `mechanics` (physis decision 0009); the C++ of metrology, geodesy and astronomy, and the navigation bridge founded (the infrastructure's ADR 0049); the address language and the galactocentric frame in navigation, WMM2025 in geophysics, the 1976 standard atmosphere in meteorology, normal gravity in geodesy, real-time scheduling and the Legendre functions in calx (calx decision 0009, the infrastructure's ADR 0050); the data library's `tiles`, `noaa-wmm` and `noaa-swpc`; the visualization layer's `globe` | SOFA's and ERFA's values, JPL Horizons, NAIF's worked example, GeographicLib, PROJ, GEOTRANS, Vallado's verification set, skyfield, astropy, NOAA's WMM test values and the 1976 tables, in the domains; the engine's answers through its protocol in `tests/run-tests.mjs`; the runtime and a session's determinism in `tests/check_runtime.py` |
 | **0. The thermal box** | a box of one material with a temperature field; heat by Fourier's law; Dirichlet and insulated faces; two frames | morphe: a box lattice with boundary; physis `discretisation`: the Laplacian on 0-forms with boundary data, the de Rham and Whitney maps; the engine: World JSON, the runtime, snapshots, the page's World, Fields and Dynamics views | the sine mode $T_b+Ae^{-\lambda t}\sin(\pi x/L)$ at second order in $h$ (the preliminary design's fixture, kept); the energy balance exact to rounding (Proposition 5.3); the frame change (Proposition 2.2) |
 | **1. Two bodies, one interface** | two boxes glued on a face, unequal steps; then two cellulations of the interface | morphe: gluing along a subcomplex; the engine: interface laws, transfers, residuals, trial and commit | the lumped two-body limit $C_1\dot T_1=-Q$, $C_2\dot T_2=Q$; the residual zero to rounding (Proposition 5.6); the transfer's total preserved (Proposition 6.2) |
 | **2. The lunar patch** | a patch of the Moon from LOLA, Moon-fixed frame by astronomy's rotation model, the Sun from DE440, uniform gravity then GRGM1200A at degree 2, a rigid body landing and resting, a rover driving to a waypoint on an inclinometer and odometry | physis `mechanics` (rigid bodies, contact), `gravitation` (harmonics); planetary-science founded (the Moon's figure and constants); `lola-dem` and `grail-gravity` registered; the engine's agents | free fall; the Sun's elevation against the Celestial Atlas; the contact's energy; $J_2$ against its closed form (Proposition 7.2); the four-bar linkage's variety (Proposition 7.4); causality (Proposition 8.4); the chain of frames (§10) |
@@ -289,7 +294,7 @@ cosmopoiesis-lab/
 ├── README.md             purpose, status, what it shows, running, the design, files, references
 ├── CLAUDE.md             the guide for Claude Code sessions here
 ├── LICENSE               MIT
-├── docs/                 architecture (this document) · formalism · glossary (later)
+├── docs/                 architecture (this document) · formalism · instruments · glossary (later)
 ├── development/          decisions · ideas · release-notes
 ├── worlds/               World JSON: the catalogue of worlds (slice 0 onwards)
 ├── agents/               Agent JSON: the archetypes (slice 2 onwards)
@@ -316,10 +321,10 @@ The infrastructure's rule holds: `node tests/run-tests.mjs` runs everything the 
 3. **Where the agents' archetypes live**: in `agents/` as the work's own until a robotics domain is founded (tier 4 of the map), or in a domain from the start.
 4. **The plug-in classes** for models, controllers and agents in the API edge (§8).
 5. **The job model** of long runs: one process per run, as proposed, or workers kept alive as the Genome Workbench keeps them.
-6. **The colour** of the page, terracotta provisionally.
+6. **The colour** of the page: decided, pink and purple (decision 0003).
 7. **The format of snapshots and checkpoints**: the engine's own binary with a JSON index, as proposed, or a standard (Zarr, netCDF) through the data library's formats.
 8. **Compile-time units** in the engine's field types, when physis decides its open decision 1.
-9. **Methods written in the engine provisionally**, to be moved down: none yet; this list is kept current.
+9. **Methods written in the engine provisionally**, to be moved down: the twelve kernels of observation (`engine/observation.hpp`), which name no object in nature; they stay here until a second work needs them (the infrastructure's ADR 0050), and then go to a foundation with their registry in the observation edge. This list is kept current.
 
 ## 13. References
 

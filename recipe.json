@@ -1,0 +1,194 @@
+{
+  "title": "The spacetime of Cosmopoiesis: its engine and its data",
+  "about": "The engine (the domains metrology, geodesy, astronomy and the navigation bridge on physis, compiled with g++ 11 or later, natively or in WSL) into data/cache/engines/cosmopoiesis/, and the data it and the page read: JPL's ephemeris DE440s (32 MB), the Moon's DE440 orientation (13 MB), the IERS's Earth orientation and the IANA's leap seconds (refreshed by running their steps again), and the sources of the terrain: ETOPO 2022, the EGM96 geoid, Natural Earth's land, LOLA's coarse grids (about 240 MB), with the finer ones fetched as the page needs them; the place names of both bodies, and the elements of satellites from CelesTrak (refreshed by running their steps again). Some minutes in all.",
+  "steps": [
+    {
+      "id": "jpl-de440s",
+      "title": "JPL's ephemeris DE440s, 1849-2150",
+      "run": [
+        "data/acquisition/fetch.py",
+        "jpl-de440s"
+      ],
+      "done": "data/cache/jpl-de440s/de440s.bsp"
+    },
+    {
+      "id": "naif-lunar-frames",
+      "title": "The Moon's orientation in DE440 (NAIF's binary PCK and frame kernel)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "naif-lunar-frames"
+      ],
+      "done": "data/cache/naif-lunar-frames/moon_pa_de440_200625.bpc"
+    },
+    {
+      "id": "iers-eop",
+      "title": "The Earth's orientation: the IERS's finals2000A, measured and predicted (refresh weekly)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "iers-eop"
+      ],
+      "done": "data/cache/iers-eop/latest/finals2000A.all"
+    },
+    {
+      "id": "iana-leap-seconds",
+      "title": "The leap seconds (IANA's list, with its expiry)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "iana-leap-seconds"
+      ],
+      "done": "data/cache/iana-leap-seconds/latest/leap-seconds.list"
+    },
+    {
+      "id": "engine",
+      "title": "The engine of spacetime, compiled with g++",
+      "run": [
+        "applications/cosmopoiesis-lab/engine.py",
+        "build"
+      ],
+      "done": "data/cache/engines/cosmopoiesis/build.json"
+    },
+    {
+      "id": "etopo-2022",
+      "title": "ETOPO 2022: the relief of land and sea floor",
+      "run": [
+        "data/acquisition/fetch.py",
+        "etopo-2022"
+      ],
+      "done": "data/cache/etopo-2022/**/retrieval.json"
+    },
+    {
+      "id": "fields-etopo-2022",
+      "title": "The relief as a field, at 5 arc-minutes",
+      "run": [
+        "data/products/field_grid.py",
+        "--source",
+        "etopo-2022"
+      ],
+      "done": "data/cache/products/fields-etopo-2022-fine.json"
+    },
+    {
+      "id": "egm96-geoid",
+      "title": "The EGM96 geoid (GeographicLib's 15-minute grid)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "egm96-geoid"
+      ],
+      "done": "data/cache/egm96-geoid/retrieval.json"
+    },
+    {
+      "id": "geoid-grid",
+      "title": "The geoid's grid, taken out of its archive",
+      "run": [
+        "data/products/geoid_grid.py"
+      ],
+      "done": "data/cache/products/geoid/egm96-15.pgm"
+    },
+    {
+      "id": "natural-earth-50m",
+      "title": "Natural Earth's land, countries and places",
+      "run": [
+        "data/acquisition/fetch.py",
+        "natural-earth-50m"
+      ],
+      "done": "data/cache/natural-earth-50m/retrieval.json"
+    },
+    {
+      "id": "land-mask",
+      "title": "Land and sea, rasterised for the terrain's sea surface",
+      "run": [
+        "data/products/land_mask.py"
+      ],
+      "done": "data/cache/products/land-mask/ne50m-20ppd.png"
+    },
+    {
+      "id": "lola-gdr",
+      "title": "LOLA's gridded heights of the Moon at 4 and 16 pixels per degree",
+      "run": [
+        "data/acquisition/fetch.py",
+        "lola-gdr"
+      ],
+      "done": "data/cache/lola-gdr/ldem_16.img"
+    },
+    {
+      "id": "usgs-moon-nomenclature",
+      "title": "The names of the Moon's features (IAU gazetteer)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "usgs-moon-nomenclature"
+      ],
+      "done": "data/cache/usgs-moon-nomenclature/retrieval.json"
+    },
+    {
+      "id": "place-names",
+      "title": "The place names of the Earth and the Moon, for searching",
+      "run": [
+        "data/products/place_names.py"
+      ],
+      "done": [
+        "data/cache/products/places/earth.json",
+        "data/cache/products/places/moon.json"
+      ]
+    },
+    {
+      "id": "hyg-v41",
+      "title": "The stars of the sky (HYG v4.1)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "hyg-v41"
+      ],
+      "done": "data/cache/hyg-v41/**/retrieval.json"
+    },
+    {
+      "id": "stars",
+      "title": "The stars as a product",
+      "run": [
+        "data/products/star_catalog.py"
+      ],
+      "done": "data/cache/products/stars-v1.json"
+    },
+    {
+      "id": "celestrak-stations",
+      "title": "Space stations' elements (CelesTrak; refresh every few hours)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "celestrak-gp",
+        "--profile",
+        "stations"
+      ],
+      "done": "data/cache/celestrak-gp/stations/gp.tle"
+    },
+    {
+      "id": "celestrak-gps-ops",
+      "title": "GPS satellites' elements (CelesTrak)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "celestrak-gp",
+        "--profile",
+        "gps-ops"
+      ],
+      "done": "data/cache/celestrak-gp/gps-ops/gp.tle"
+    },
+    {
+      "id": "celestrak-galileo",
+      "title": "Galileo satellites' elements (CelesTrak)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "celestrak-gp",
+        "--profile",
+        "galileo"
+      ],
+      "done": "data/cache/celestrak-gp/galileo/gp.tle"
+    },
+    {
+      "id": "celestrak-visual",
+      "title": "The brightest satellites' elements (CelesTrak)",
+      "run": [
+        "data/acquisition/fetch.py",
+        "celestrak-gp",
+        "--profile",
+        "visual"
+      ],
+      "done": "data/cache/celestrak-gp/visual/gp.tle"
+    }
+  ]
+}

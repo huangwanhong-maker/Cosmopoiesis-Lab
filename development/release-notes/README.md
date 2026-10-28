@@ -13,4 +13,4 @@ A running record, for readers, of what each commit of this work made possible or
 
 | Date | Commits |
 |---|---|
-| [2026-10-28](2026-10-28.md) | The founding of Cosmopoiesis: its formalism, its architecture, its guide |
+| [2026-10-28](2026-10-28.md) | One world, its addresses and its instruments; the founding of Cosmopoiesis: its formalism, its architecture, its guide |
