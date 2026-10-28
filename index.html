@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="night">
+<html lang="en" data-theme="night" data-deck="science">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" media="print" onload="this.media='all'"
-        href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,300..700;1,8..60,300..600&display=swap">
+        href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400..600&family=Source+Sans+3:wght@400..700&family=Source+Code+Pro:wght@400..600&display=swap">
   <link rel="stylesheet" href="styles.css">
   <script type="importmap">
     { "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
@@ -40,9 +40,37 @@
     <div class="clocks" id="clocks"></div>
     <div class="annunciators" id="annunciators" aria-label="Annunciators"></div>
     <div class="tools">
+      <div class="deck" role="group" aria-label="The deck">
+        <button type="button" class="key small" data-deck="science" title="The world first: the point chosen, its environment, the field about it, the instruments' readings">Science</button>
+        <button type="button" class="key small" data-deck="engineering" title="The machinery: the catalogue of frames, the bus of readings, the scheduling, the engine and its data">Engineering</button>
+      </div>
       <button type="button" class="key icon" id="theme" title="Night or day" aria-label="Night or day">◐</button>
     </div>
   </header>
+
+  <nav class="context" id="context" aria-label="The context: what is looked at, from where, at which point, in which frame, read by which instruments">
+    <button type="button" class="ctx view" id="ctx-view" title="What the camera looks at (the reticle at the centre of the view)">
+      <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" class="glyph-line"/><path d="M8 1v4M8 11v4M1 8h4M11 8h4" class="glyph-line"/></svg>
+      <span class="ctx-text"><span class="ctx-label">View</span><span class="ctx-value" id="ctx-view-value">—</span></span>
+    </button>
+    <button type="button" class="ctx point grow" id="ctx-point" title="The point chosen, the place every display studies: click the world to choose it">
+      <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2" class="glyph-point"/><path d="M8 0.5v4M8 11.5v4M0.5 8h4M11.5 8h4" class="glyph-point"/></svg>
+      <span class="ctx-text"><span class="ctx-label">Point chosen</span><span class="ctx-value" id="ctx-point-value">none: click the world</span></span>
+    </button>
+    <button type="button" class="ctx observer grow" id="ctx-observer" title="Where the instruments mounted on the observer read from">
+      <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 L13.5 8 L8 14.5 L2.5 8 Z" class="glyph-observer"/></svg>
+      <span class="ctx-text"><span class="ctx-label">Observer</span><span class="ctx-value" id="ctx-observer-value">—</span></span>
+    </button>
+    <button type="button" class="ctx frame" id="ctx-frame" title="The frame in which positions on the body in view are written">
+      <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 13 L3 3 M3 13 L13 13 M3 13 L9 7.5" class="glyph-line"/></svg>
+      <span class="ctx-text"><span class="ctx-label">Frame</span><span class="ctx-value" id="ctx-frame-value">—</span></span>
+    </button>
+    <button type="button" class="ctx mounts" id="ctx-mounts" title="The instruments of the session, by where they are mounted">
+      <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="9" r="5.5" class="glyph-line"/><path d="M8 9 L11 5.5" class="glyph-line"/><path d="M5 2h6" class="glyph-line"/></svg>
+      <span class="ctx-text"><span class="ctx-label">Instruments</span><span class="ctx-value" id="ctx-mounts-value">—</span></span>
+    </button>
+    <div class="ctx relation" id="ctx-relation"><span class="ctx-text"><span class="ctx-label">&nbsp;</span><span class="ctx-value" id="ctx-relation-value"></span></span></div>
+  </nav>
 
   <section class="mfd left bezel" id="mfd-left" aria-label="The left display"></section>
   <section class="mfd right bezel" id="mfd-right" aria-label="The right display"></section>
@@ -53,9 +81,9 @@
       <div class="grid" id="body-keys"></div>
     </div>
     <form class="address" id="address" autocomplete="off" role="search">
-      <div class="label"><span>Spacetime address</span><span id="address-help">a place, a crater, or an address · ↵ go</span></div>
+      <div class="label"><span>Spacetime address</span><span id="address-help">a place's name, coordinates, or an address · examples: click the line</span></div>
       <div class="line" style="position:relative">
-        <input id="address-input" type="text" spellcheck="false" placeholder="earth(48.8584 N, 2.2945 E) · moon(43.31 S, 11.36 W) · Tycho · ICRS:equatorial(266.4°, -28.9°, 8.1 kpc)" aria-label="A spacetime address">
+        <input id="address-input" type="text" spellcheck="false" placeholder="Tycho · moon(43.31 S, 11.36 W) · earth(48.8584 N, 2.2945 E) @ now" aria-label="A spacetime address">
         <button type="submit" class="key">Go</button>
         <ul class="results bezel" id="address-results" role="listbox" hidden></ul>
       </div>

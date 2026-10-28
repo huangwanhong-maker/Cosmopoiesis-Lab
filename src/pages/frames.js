@@ -11,13 +11,16 @@ import { engine } from '../api.js';
 import { esc, fmt, ttText } from '../format.js';
 
 export function framesPage(app) {
-  let el, frames = [], loaded = false;
+  let el, frames = [], loaded = false, query = '';
   let from = 'ITRS', to = 'ICRS';
+  const shut = new Set();  // the frames whose children are folded away
   const page = {
     mount(root) {
       el = root;
       el.innerHTML = `
         <h3>The catalogue <span class="aside">click: from · shift-click: to</span></h3>
+        <div class="filters"><input type="search" id="fr-search" placeholder="Find a frame: ITRS, MOON_ME, ecliptic…" aria-label="Find a frame">
+          <button type="button" class="key small" data-tree="open">Unfold</button><button type="button" class="key small" data-tree="shut">Fold</button></div>
         <div class="tree" id="fr-tree">…</div>
         <h3>Carry a point</h3>
         <div class="row"><span>from</span><select id="fr-from"></select></div>
@@ -30,7 +33,17 @@ export function framesPage(app) {
         <p class="note">Two routes between two frames close a loop. Once round it, the motion is the identity when the standards agree; otherwise its angle and slide measure by how much, and they are the same whatever realisation of each frame is chosen (a gauge transformation conjugates the holonomy).</p>
         <table><tbody id="fr-loops"></tbody></table>
         <p><button type="button" class="key small" id="fr-holonomy">Measure at the world's instant</button></p>`;
+      el.querySelector('#fr-search').addEventListener('input', (e) => { query = e.target.value.trim().toLowerCase(); fill(); });
       el.addEventListener('click', (e) => {
+        const tw = e.target.closest('[data-twist]');
+        if (tw) { const k = tw.dataset.twist; if (shut.has(k)) shut.delete(k); else shut.add(k); fill(); return; }
+        const t = e.target.closest('[data-tree]');
+        if (t) {
+          shut.clear();
+          if (t.dataset.tree === 'shut') for (const f of frames) if (frames.some((g) => g.parent === f.name)) shut.add(f.name);
+          fill();
+          return;
+        }
         const f = e.target.closest('[data-frame]');
         if (f) { if (e.shiftKey) to = f.dataset.frame; else from = f.dataset.frame; fill(); return; }
         if (e.target.id === 'fr-convert') convert();
@@ -52,8 +65,18 @@ export function framesPage(app) {
     el.querySelector('#fr-to').value = to;
     const children = new Map();
     for (const f of frames) { if (!children.has(f.parent)) children.set(f.parent, []); children.get(f.parent).push(f); }
-    const node = (f) => `<li><span class="frame ${f.name === from ? 'from' : ''} ${f.name === to ? 'to' : ''}" data-frame="${esc(f.name)}" title="${esc(f.about)}">${esc(f.name)}</span>${children.has(f.name) ? `<ul>${children.get(f.name).map(node).join('')}</ul>` : ''}</li>`;
-    el.querySelector('#fr-tree').innerHTML = `<ul>${(children.get(null) || []).map(node).join('')}</ul>`;
+    // A search keeps the frames that match and the paths to them, unfolded.
+    const matches = (f) => !query || f.name.toLowerCase().includes(query) || String(f.about || '').toLowerCase().includes(query);
+    const keep = new Map();
+    const visit = (f) => { const kids = (children.get(f.name) || []).map(visit).some(Boolean); const k = matches(f) || kids; keep.set(f.name, k); return k; };
+    for (const f of children.get(null) || []) visit(f);
+    const node = (f) => {
+      if (!keep.get(f.name)) return '';
+      const kids = (children.get(f.name) || []).filter((g) => keep.get(g.name));
+      const folded = !query && shut.has(f.name);
+      return `<li class="${folded ? 'shut' : ''}">${kids.length ? `<span class="twist" data-twist="${esc(f.name)}">${folded ? '▸' : '▾'}</span>` : '<span class="twist"></span>'}<span class="frame ${f.name === from ? 'from' : ''} ${f.name === to ? 'to' : ''} ${query && matches(f) ? 'match' : ''}" data-frame="${esc(f.name)}" title="${esc(f.about)}">${esc(f.name)}</span>${query && matches(f) && f.about ? `<span class="about">${esc(String(f.about).slice(0, 60))}</span>` : ''}${kids.length ? `<ul>${kids.map(node).join('')}</ul>` : ''}</li>`;
+    };
+    el.querySelector('#fr-tree').innerHTML = `<ul>${(children.get(null) || []).map(node).join('')}</ul>` || '<p class="note">no frame matches</p>';
   }
   async function load() {
     try {

@@ -5,7 +5,8 @@
 // astronomy's; what is here is the operator: what is read, from where, with what noise.
 //
 //   clock.scales            the instant in every time scale at the mount (model; UT1 an archive's)
-//   position.truth          the mount's place in its frames, an ideal probe (model)
+//   position.truth          the reference state: the mount's modelled place in its frames, without
+//                           error, an ideal numerical probe and a control (model)
 //   sun.sensor              the Sun's direction, the fraction of its disc not hidden by the
 //                           horizon or another body (eclipses), the irradiance (model)
 //   sky.bodies              the Sun, the Moon, the Earth and the planets in the local sky (model)
@@ -148,10 +149,12 @@ class ClockInstrument final : public ClockReading {
 class PositionInstrument final : public Proprioceptive {
  public:
   PositionInstrument() {
-    info_ = {"position.truth", "Position (truth)", "J06", Kernel::proprioceptive, Provenance::model,
+    info_ = {"position.truth", "Reference state", "J06", Kernel::proprioceptive, Provenance::model,
              {{"latitude_deg", "deg", "on the body's figure"}, {"longitude_deg", "deg", ""}, {"height_m", "m", "above the figure"},
               {"gcrs_m", "m", "from the Earth's centre, ICRS axes"}, {"icrs_m", "m", "from the barycentre"}},
-             2e-5, 1, "the catalogue of frames (navigation)", "the mount's place itself, without error: an ideal numerical probe, a control, not an instrument", ""};
+             2e-5, 1, "the catalogue of frames (navigation)",
+             "the mount's modelled place, without error: an ideal numerical probe and a control, against which the instruments' readings are held; not an instrument of the world",
+             ""};
   }
   const InstrumentInfo& info() const override { return info_; }
   Coverage coverage(const World&) const override { Coverage c; c.about = "the ephemeris's span"; return c; }

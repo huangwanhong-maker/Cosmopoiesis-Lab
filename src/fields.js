@@ -23,7 +23,7 @@ function ramp(stops, t) {
 export const FIELD_FLOOR_T = 1e-9;
 
 // The engine's float32 values, sent as base64 (little-endian, as every browser's typed arrays are here).
-function float32(text) {
+export function float32(text) {
   const s = atob(text), bytes = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
   return new Float32Array(bytes.buffer);

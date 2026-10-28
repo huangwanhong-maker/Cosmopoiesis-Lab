@@ -25,6 +25,10 @@ import { Gazetteer, parseCoordinates } from '../src/places.js';
 import { WorldMotion } from '../src/world.js';
 import { maxRangeOf, DEFAULT_VIEWS } from '../src/navigator.js';
 import { provenanceClass } from '../src/busclient.js';
+import { arrowsGeometry, cellOffset, cellPosition, centreValue, colourOf, gradientOf, groundGeometry, scaleOf, visibleCells } from '../src/volume.js';
+import { primary } from '../src/readings.js';
+import { nearestPlace } from '../src/pages/point.js';
+import { analysisHtml } from '../src/pages/sched.js';
 
 const { assert, check, skip, done } = suite();
 const APP = resolve(ROOT, 'applications/cosmopoiesis-lab');
@@ -126,6 +130,67 @@ assert('navigator: the system\'s view holds Neptune\'s orbit, and the Sun in foc
 assert('navigator: from the Earth the camera may stand beyond the Moon\'s orbit', maxRangeOf('earth', { a: 6378137 }) > 4.06e8);
 assert('provenance: five classes of reading, an unknown one read as a model',
   ['physical', 'archive', 'model', 'synthetic', 'assimilated', 'guess'].map(provenanceClass).join() === 'observed,archive,model,synthetic,assimilated,model');
+
+// ---- the field's cube, as the page reckons it (decision 0006) --------------------------------------------------
+{
+  const n = 7, L = 7000, N3 = n * n * n;
+  const centre = (n - 1) / 2 * (1 + n + n * n);
+  check('cube: the middle cell of an odd cube lies at its centre', Math.hypot(...cellOffset(n, L, centre)), 0, 'm');
+  check('cube: the first cell lies half a cell in from the south-west-lower corner, east fastest',
+    Math.hypot(...cellOffset(n, L, 0).map((x) => x + L / 2 - L / (2 * n))) + Math.abs(cellOffset(n, L, 1)[0] - cellOffset(n, L, 0)[0] - L / n), 0, 'm');
+  assert('cube: in three.js\'s axes east is x, up is y and north is −z (a right-handed frame)',
+    cellPosition(n, centre + 1)[0] > 0 && cellPosition(n, centre + n * n)[1] > 0 && cellPosition(n, centre + n)[2] < 0);
+  // A linear field a + g·x, with a few cells unread, gives back its gradient and its mean.
+  const g = [3.5e-3, -1.25e-3, -2.0e-2], a = 4.2e4;
+  const values = Float32Array.from({ length: N3 }, (_, idx) => { const x = cellOffset(n, L, idx); return a + g[0] * x[0] + g[1] * x[1] + g[2] * x[2]; });
+  for (const idx of [0, 5, 17, 200]) values[idx] = NaN;
+  const fit = gradientOf(values, n, L);
+  check('cube: the linear fit recovers the gradient of a linear field with cells unread', Math.max(...[fit.east - g[0], fit.north - g[1], fit.up - g[2]].map(Math.abs)) / 2e-2, 2e-5);
+  check('cube: and its mean', (fit.mean - a) / a, 1e-7);
+  check('cube: the value at the centre of an odd cube is its middle cell\'s', centreValue(values, n) - values[centre], 0);
+  const even = Float32Array.from({ length: 64 }, (_, idx) => idx);
+  check('cube: of an even cube, the mean of the eight about its centre', centreValue(even, 4) - 31.5, 0);
+  // Scales and colours.
+  const lin = scaleOf(values), log = scaleOf(values, { log: true }), about = scaleOf(values, { about: a });
+  assert('cube: a linear scale spans the values read', lin.kind === 'linear' && Math.abs(lin.t(lin.lo)) < 1e-12 && Math.abs(lin.t(lin.hi) - 1) < 1e-12);
+  assert('cube: a logarithmic scale spans them too', log.kind === 'log' && Math.abs(log.t(log.hi) - 1) < 1e-12 && Math.abs(log.t(log.lo)) < 1e-12);
+  assert('cube: a diverging scale is symmetric about its value', about.kind === 'diverging' && Math.abs(about.t(a)) < 1e-12 && Math.abs(about.t(about.hi) - 1) < 1e-9 && Math.abs(about.t(about.lo) + 1) < 1e-9);
+  assert('cube: a cell without a value has no colour', colourOf(lin, NaN) === null);
+  const luminance = ([r, gg, b]) => 0.2126 * r + 0.7152 * gg + 0.0722 * b;
+  const ramp = [0, 0.25, 0.5, 0.75, 1].map((t) => luminance(colourOf(lin, lin.lo + t * (lin.hi - lin.lo), true)));
+  assert('cube: the sequential colours grow lighter with the value, so their order reads without hue', ramp.every((x, i) => i === 0 || x > ramp[i - 1]), ramp.map((x) => x.toFixed(3)).join(' '));
+  // The cells each way of showing keeps.
+  const full = Float32Array.from({ length: N3 }, () => 1);
+  check('cube: the shell is n³ − (n−2)³ cells', visibleCells(full, n, 'shell').length - (N3 - (n - 2) ** 3), 0);
+  check('cube: three slices through a cell are 3n² − 3n + 1 cells', visibleCells(full, n, 'slices', [3, 3, 3]).length - (3 * n * n - 3 * n + 1), 0);
+  check('cube: the cells shown leave out those unread', visibleCells(values, n, 'cells').length - (N3 - 4), 0);
+  // The figure's surface through the cube: every point on the sphere.
+  const R = 1737.4e3, h = 20e3, edge = 100e3, ground = groundGeometry(R, h, edge);
+  let worst = 0;
+  for (let i = 0; i < ground.length; i += 3) {
+    const e = ground[i] * edge, u = ground[i + 1] * edge, no = -ground[i + 2] * edge;
+    worst = Math.max(worst, Math.abs(Math.hypot(e, no, u + R + h) - R));
+  }
+  assert('cube: the figure\'s surface drawn lies on the sphere to a metre', ground.length > 0 && worst < 1, `${worst} m`);
+  // Arrows of a uniform field point along it.
+  const north = { east: new Float32Array(N3), north: new Float32Array(N3).fill(1), up: new Float32Array(N3) };
+  const arrows = arrowsGeometry(n, north).positions;
+  assert('cube: arrows of a field due north point along −z', arrows.length > 0 && Math.abs(arrows[0] - arrows[3]) < 1e-9 && arrows[5] < arrows[2]);
+  assert('cube: the departure of a uniform field is nothing to draw', arrowsGeometry(n, north, { departure: true }).positions.length === 0);
+}
+{
+  const p = primary({ family: 'magnetometer.wmm2025', available: true, values: { total_T: 4.91284e-5, north_T: 1.9561e-5, east_T: 4.3e-7, down_T: 4.5063e-5, declination_deg: 1.26, inclination_deg: 66.53 } });
+  assert('readings: a magnetometer is read first as |B| in nanotesla', p.value === '49,128' && p.unit === 'nT', `${p.value} ${p.unit}`);
+  assert('readings: an unknown family shows its first numbers', primary({ family: 'x', available: true, values: { speed_m_s: 12.5, note: 'a' }, units: { speed_m_s: 'm/s' } }).unit === 'm/s');
+  assert('readings: no reading where the instrument cannot read', primary({ family: 'magnetometer.wmm2025', available: false, reason: 'outside' }) === null);
+  const gz = new Gazetteer();
+  gz.add('moon', { places: [['Tycho', -11.36, -43.31, 'Crater', '', 85]] });
+  assert('point: a point in Tycho is named by it', nearestPlace(gz, 'moon', -43.4, -11.3)?.inside === true);
+  assert('point: a point 300 km away is not', nearestPlace(gz, 'moon', -33.3, -11.3) === null);
+  const html = analysisHtml({ utilisation: 0.079, edf_one_worker: { feasible: true }, liu_layland_bound: 0.7, workers: 4, horizon_s: 2,
+    policies: [{ policy: 'edf', jobs: 231, misses: 108, starved: 0, max_lateness_s: 0.06 }] }, true);
+  assert('sched: with a burst of 200 jobs of 2 ms due in 50 ms, 4 workers leave at least 100 late under any policy', /at least 100 of the burst/.test(html));
+}
 
 // ---- the recipe -----------------------------------------------------------------------------------------------
 {
@@ -245,6 +310,9 @@ if (!state || !state.built || !state.data.ephemeris) {
     ['clock.scales', 'position.truth', 'sun.sensor', 'sky.bodies', 'gnss.receiver', 'gravimeter.body', 'magnetometer.wmm2025', 'atmosphere.ussa1976', 'radiosonde.ussa1976'].every((f) => families.includes(f)), families.join());
   assert('instruments: every family is one of the kernels, with a provenance', (ins.families || []).every((f) => kernels.has(f.kernel) && f.provenance));
   assert('instruments: the compass and the Moon\'s magnetometer are families of the engine', ['compass.magnetic', 'magnetometer.moon'].every((f) => families.includes(f)));
+  const reference = (ins.families || []).find((f) => f.family === 'position.truth');
+  assert('instruments: position.truth is the reference state, the mount\'s modelled place without error, an ideal probe and a control',
+    reference?.title === 'Reference state' && /modelled place/.test(reference?.about || '') && /control/.test(reference?.about || ''), reference?.title);
   const classes = new Set((ins.kernels || []).map((k) => k.class));
   const declared = ins.declared || [];
   assert('instruments: the encyclopedia\'s 101 families are declared, each bound to one of the twelve kernel classes',
@@ -276,6 +344,121 @@ if (!state || !state.built || !state.data.ephemeris) {
   const radial = ask({ op: 'field_map', body: 'moon', quantity: 'radial', step_deg: 2 });
   assert('field map: its radial component takes both signs and is never larger than |B|',
     radial.min < 0 && radial.max > 0 && radial.values?.every((x, i) => Math.abs(x) <= map.values[i] * (1 + 1e-12)));
+
+  // ---- the neighbourhood of an event: a family read in the n³ cells of a cube (probe_volume) ----------------------
+  // Held to truths outside the operation: NOAA's test values of WMM2025, pyshtools on T2015_449, the
+  // 1976 standard's temperature law, the field equations outside the sources (∇·B = 0 and ∇×B = 0 for
+  // the main field; ∇·g = 2ω² and ∇×g = 0 for normal gravity, the potential's Laplacian in the
+  // rotating frame). The equality of a cube's centre with a session's own sensor is checked in
+  // tests/check_runtime.py, which holds a session.
+  {
+    const T0 = '2026-10-28T12:00:00Z';
+    const cube = (request) => ask({ op: 'probe_volume', time: T0, ...request });
+    const nan = (xs) => (xs || []).map((v) => (v === null ? NaN : v));
+    const values = (a, nm) => nan((a.quantities || []).find((x) => x.name === nm)?.values);
+    const centre = (n) => { const m = (n - 1) / 2; return m + n * (m + n * m); };
+    const cells = (a) => a.n ** 3;
+    const counted = (a) => a.counts ? a.counts.read + a.counts.outside + a.counts.missing + a.counts.invalid : -1;
+    const f32 = (text) => (text ? Array.from(new Float32Array(Uint8Array.from(Buffer.from(text, 'base64')).buffer)) : []);
+    const rows = (path) => readFileSync(resolve(ROOT, path), 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'));
+
+    // 1. With n odd, the centre cell is the family's reading at the centre itself.
+    const wmmTest = rows('domains/geophysics/tests/fixtures/wmm2025-test-values.txt').map((l) => l.trim().split(/\s+/).map(Number)).find((r) => r[0] === 2025 && r[2] === 43 && r[3] === 93);
+    const wmm5 = wmmTest ? cube({ at: `earth(43 N, 93 E, ${wmmTest[1]} km)`, time: '2025-01-01T00:00:00Z', family: 'magnetometer.wmm2025', edge_m: 10000, n: 5 }) : {};
+    const nT = 1e-9, c5 = centre(5);
+    const wmmErr = wmmTest && wmm5.quantities ? Math.max(...[['north_T', 7], ['east_T', 8], ['down_T', 9], ['total_T', 10]].map(([nm, k]) => Math.abs(values(wmm5, nm)[c5] / nT - wmmTest[k]))) : NaN;
+    check('probe volume: the centre of a WMM2025 cube is NOAA\'s test point at 65 km over 43° N, 93° E in 2025.0 (X, Y, Z, F; the file departs from the report by 7e-4 nT)', wmmErr, 1e-3, 'nT');
+    const lunar = rows('domains/planetary-science/tests/fixtures/lunar-field.txt').map((l) => l.trim().split(/\s+/)).find((r) => r[0] === 'gerasimovich');
+    const moon3 = lunar ? cube({ at: `moon(${Math.abs(+lunar[1])} S, ${Math.abs(+lunar[2])} W, ${+lunar[3]} m)`, family: 'magnetometer.moon', edge_m: 1000, n: 3 }) : {};
+    const bRef = lunar ? Math.hypot(+lunar[4], +lunar[5], +lunar[6]) : NaN;
+    const moonErr = moon3.quantities ? Math.max(...[['north_T', 4], ['east_T', 5], ['down_T', 6]].map(([nm, k]) => Math.abs(values(moon3, nm)[centre(3)] - +lunar[k]))) / bRef : NaN;
+    check('probe volume: the centre of a lunar cube over Gerasimovich is T2015_449 as pyshtools gives it (to 1e-7 of |B|)', moonErr, 1e-7);
+    const air5 = cube({ at: 'earth(45 N, 10 E, 1500 m)', family: 'atmosphere.ussa1976', edge_m: 1000, n: 5 });
+    const z = values(air5, 'height_msl_m')[c5], r0 = 6356766, hGeo = (r0 * z) / (r0 + z);
+    check('probe volume: the centre of an atmosphere cube has the 1976 standard\'s temperature, 288.15 K − 6.5 K/km of geopotential height (its eq. 23)',
+      values(air5, 'temperature_K')[c5] - (288.15 - 6.5e-3 * hGeo), 1e-9, 'K');
+    const axes = air5.axes?.rotation;
+    const phi = 45 * Math.PI / 180, lam = 10 * Math.PI / 180;
+    const up = [Math.cos(phi) * Math.cos(lam), Math.cos(phi) * Math.sin(lam), Math.sin(phi)];
+    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    assert('probe volume: its axes are the east, north and up of WGS 84 at the centre, orthonormal, up along the normal',
+      axes && [0, 1, 2].every((a) => [0, 1, 2].every((b) => Math.abs(dot(axes[a], axes[b]) - (a === b ? 1 : 0)) < 1e-15)) && Math.hypot(...axes[2].map((x, k) => x - up[k])) < 1e-15
+      && axes[0][2] === 0 && air5.order === 'east fastest, then north, then up', JSON.stringify(axes));
+    const rise = [0, 1, 2, 3].map((k) => values(air5, 'height_msl_m')[centre(5) - 2 * 25 + (k + 1) * 25] - values(air5, 'height_msl_m')[centre(5) - 2 * 25 + k * 25]);
+    check('probe volume: up is the slowest index, a cell\'s edge apart from layer to layer (cells i + n(j + nk))', Math.max(...rise.map((d) => Math.abs(d - air5.cell_m))), 1e-6, 'm');
+
+    // 2. WMM2025's cube is a potential field outside its sources: by central differences over the cells, in the
+    // cube's axes, ∇·B and ∇×B vanish beside the gradient's scale. Its vector is turned from each cell's own
+    // north, east and down into the cube's axes; taken unturned, as if the local frames were one, it fails.
+    const fieldMetrics = (a, comps) => {
+      const n = a.n, h = a.cell_m, at = (c, i, j, k) => c[i + n * (j + n * k)];
+      let div = 0, curl = 0, grad = 0, sum = 0, used = 0;
+      for (let k = 1; k < n - 1; k++) for (let j = 1; j < n - 1; j++) for (let i = 1; i < n - 1; i++) {
+        const G = comps.map((c) => [(at(c, i + 1, j, k) - at(c, i - 1, j, k)) / (2 * h), (at(c, i, j + 1, k) - at(c, i, j - 1, k)) / (2 * h), (at(c, i, j, k + 1) - at(c, i, j, k - 1)) / (2 * h)]);
+        if (G.flat().some((x) => !Number.isFinite(x))) continue;
+        used++;
+        const d = G[0][0] + G[1][1] + G[2][2];
+        div = Math.max(div, Math.abs(d)); sum += d;
+        curl = Math.max(curl, Math.hypot(G[2][1] - G[1][2], G[0][2] - G[2][0], G[1][0] - G[0][1]));
+        grad = Math.max(grad, ...G.flat().map(Math.abs));
+      }
+      return { used, div: div / grad, curl: curl / grad, mean_div: sum / used, grad };
+    };
+    const wmm12 = cube({ at: 'earth(51.4769 N, 0.0005 W, 200 km)', family: 'magnetometer.wmm2025', edge_m: 200000, n: 12 });
+    const v12 = wmm12.vector || {};
+    const potential = wmm12.vector ? fieldMetrics(wmm12, [nan(v12.east), nan(v12.north), nan(v12.up)]) : { div: NaN, curl: NaN, used: 0 };
+    assert('probe volume: WMM2025 over Greenwich (200 km cube at 200 km, 12³ cells) is a potential field: |∇·B| and |∇×B| below 1% of max|∂Bᵢ/∂xⱼ|',
+      potential.used === 1000 && potential.div < 0.01 && potential.curl < 0.01, `div ${potential.div?.toExponential(2)}, curl ${potential.curl?.toExponential(2)} of ${potential.grad?.toExponential(2)} T/m`);
+    const unturned = wmm12.quantities ? fieldMetrics(wmm12, [values(wmm12, 'east_T'), values(wmm12, 'north_T'), values(wmm12, 'down_T').map((x) => -x)]) : { div: 0 };
+    assert('probe volume: the cells\' own north, east and down, taken unturned as the cube\'s axes, are not (the rotation matters)', unturned.div > 0.1, `div ${unturned.div?.toExponential(2)}`);
+    const tot = values(wmm12, 'total_T');
+    const norms = nan(v12.east).map((e, i) => Math.abs(Math.hypot(e, nan(v12.north)[i], nan(v12.up)[i]) - tot[i]) / tot[i]);
+    check('probe volume: the turned vector keeps each cell\'s |B|', norms.length ? Math.max(...norms) : NaN, 1e-12);
+    assert('probe volume: the vector is B in tesla, in the cube\'s axes', v12.name === 'B' && v12.unit === 'T' && /cube's axes/.test(v12.frame || ''), JSON.stringify({ name: v12.name, unit: v12.unit, frame: v12.frame }));
+    const grav = cube({ at: 'earth(30 S, 140 E, 100 km)', family: 'gravimeter.body', edge_m: 20000, n: 7 });
+    const gm = grav.vector ? fieldMetrics(grav, [nan(grav.vector.east), nan(grav.vector.north), nan(grav.vector.up)]) : { mean_div: NaN, curl: NaN };
+    const omega = 7.292115e-5;  // WGS 84's angular velocity, rad/s (NGA.STND.0036, Table 3.1)
+    check('probe volume: normal gravity\'s cube (20 km at 100 km) has ∇·g = 2ω², the normal potential\'s Laplacian in the rotating frame (relative)', gm.mean_div / (2 * omega * omega) - 1, 0.01);
+    check('probe volume: and ∇×g = 0 (beside its gradient)', gm.curl, 1e-4);
+
+    // 3. Every cell is counted once; where the family cannot read, no value, and the reason.
+    const ground = cube({ at: 'earth(45 N, 10 E)', family: 'atmosphere.ussa1976', edge_m: 20000, n: 4 });
+    const tK = values(ground, 'temperature_K');
+    assert('probe volume: a cube on the ground, half below it: the 1976 standard\'s cells deeper than 5 km (the lowest layer) have no value, and say so',
+      ground.counts?.outside === 16 && ground.counts?.read === 48 && tK.every((x, i) => (i < 16) === Number.isNaN(x))
+      && ground.reasons?.[0]?.quality === 'outside' && /heights/.test(ground.reasons?.[0]?.reason || '') && ground.reasons?.[0]?.count === 16,
+      JSON.stringify({ counts: ground.counts, reasons: ground.reasons }));
+    const answered = [wmm5, moon3, air5, wmm12, grav, ground];
+    assert('probe volume: the counts of every cube sum to n³', answered.every((a) => a.n && counted(a) === cells(a)), answered.map((a) => `${counted(a)}/${a.n ** 3}`).join(' '));
+
+    // 4. Families whose readings are not fields over space, cubes too large, and families unknown are refused.
+    const refused = [
+      [{ family: 'clock.scales', at: 'earth(45 N, 10 E)', edge_m: 1000, n: 3 }, /clock's reading is not a field/],
+      [{ family: 'magnetometer.wmm2025', at: 'earth(45 N, 10 E)', edge_m: 1000, n: 25 }, /from 2 to 24/],
+      [{ family: 'magnetometer.nowhere', at: 'earth(45 N, 10 E)', edge_m: 1000, n: 3 }, /no instrument family/],
+      [{ family: 'declared.C06', at: 'earth(45 N, 10 E)', edge_m: 1000, n: 3 }, /declared, not implemented/],
+      [{ family: 'magnetometer.wmm2025', at: 'GCRS:cartesian(7000 km, 0 m, 0 m)', edge_m: 1000, n: 3 }, /body with a surface/],
+    ].map(([r, why]) => [r.family + (r.n === 25 ? ' at n = 25' : r.at.startsWith('GCRS') ? ' in open space' : ''), why.test(cube(r).error || '')]);
+    assert('probe volume: a clock, n = 25, an unknown family, a declared one and a centre in open space are refused, each with its reason',
+      refused.every(([, ok]) => ok), refused.filter(([, ok]) => !ok).map(([what]) => what).join(', '));
+
+    // 5. As float32 in base64 the values are the JSON numbers rounded to float32, NaN where there is none.
+    const same32 = (json, packed) => { const p = f32(packed); return p.length === json.length && json.every((x, i) => (Number.isNaN(x) ? Number.isNaN(p[i]) : p[i] === Math.fround(x))); };
+    const wmm12f = cube({ at: 'earth(51.4769 N, 0.0005 W, 200 km)', family: 'magnetometer.wmm2025', edge_m: 200000, n: 12, encoding: 'f32' });
+    const groundf = cube({ at: 'earth(45 N, 10 E)', family: 'atmosphere.ussa1976', edge_m: 20000, n: 4, encoding: 'f32' });
+    assert('probe volume: the f32 and json encodings agree, quantities and vector, NaN where a cell has no reading',
+      [[wmm12, wmm12f], [ground, groundf]].every(([j, f]) => j.quantities && f.quantities && j.quantities.length === f.quantities.length
+        && j.quantities.every((q, k) => f.quantities[k].name === q.name && same32(nan(q.values), f.quantities[k].values_f32)))
+      && ['east', 'north', 'up'].every((c) => same32(nan(v12[c]), wmm12f.vector?.[c])));
+
+    // 6. A cube is a function of its request: two runs agree exactly, on any number of threads.
+    const strip = (a) => JSON.stringify({ ...a, elapsed_s: 0, threads: 0 });
+    const lunarFine = { at: 'moon(7.5 N, 59 W, 20 km)', family: 'magnetometer.moon', edge_m: 30000, n: 5, settings: { synthetic: true } };
+    const once = cube({ ...lunarFine, threads: 1 }), twice = cube({ ...lunarFine, threads: 6 });
+    assert('probe volume: two runs agree exactly, on one thread and on six (the Moon\'s crust with its synthetic small scales)',
+      !once.error && once.counts?.read > 0 && strip(once) === strip(twice) && strip(cube({ at: 'earth(45 N, 10 E)', family: 'atmosphere.ussa1976', edge_m: 20000, n: 4 })) === strip(ground),
+      once.error || '');
+  }
 
   // ---- coordinates: the top of the Eiffel Tower ----------------------------------------------------------
   const eiffel = { system: 'geodetic', latitude_deg: 48.8584, longitude_deg: 2.2945, height_m: 330 };

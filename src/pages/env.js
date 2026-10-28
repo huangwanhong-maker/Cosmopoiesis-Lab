@@ -1,14 +1,26 @@
-// ENV: the environment of the observer, as its instruments read it (decision 0004).
+// ENV: the environment of the observer, as its instruments read it (decisions 0004 and 0006).
 //
-// Every value here is a reading on the bus, and says what it is: the standard atmosphere's column and
-// the World Magnetic Model's field are models, the Sun's place a model of the ephemeris, the terrain
-// beneath an archive's measurement, the space weather the present's physical instruments (DSCOVR or
-// IMAP at L1, GOES, the ground's magnetometers), each with its age. Nothing is filled in where an
-// instrument cannot read: it says why.
+// The page says first which place its readings describe (the observer, drawn in orchid in the world,
+// and whether it is the point chosen), then shows each reading as a value to be read at a glance, with
+// its unit, its provenance and its age, its parts and profiles beneath. Every value is a reading on
+// the bus: the standard atmosphere's column and the World Magnetic Model's field are models, the Sun's
+// place a model of the ephemeris, the terrain beneath an archive's measurement, the space weather the
+// present's physical instruments (DSCOVR or IMAP at L1, GOES, the ground's magnetometers). Nothing is
+// filled in where an instrument cannot read: it says why.
 
 import { compassRose, gauge, profile, skyplot } from '../charts.js';
 import { provenanceTag } from '../busclient.js';
 import { duration, esc, fmt, latText, length, lonText } from '../format.js';
+import { OBSERVER_GLYPH } from './point.js';
+
+const nT = (t) => t * 1e9;
+
+// A tile: what, the value and its unit, a line beneath, the provenance.
+function tile(what, value, unit, { sub = '', prov = '', wide = false, big = false, text = false } = {}) {
+  return `<div class="reading${wide ? ' wide' : ''}${big ? ' big' : ''}"><div class="what">${what}${prov ? ` ${prov}` : ''}</div>
+    <div class="v${text ? ' text' : ''}">${value}${unit ? `<span class="u">${unit}</span>` : ''}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+}
+const off = (what, why) => `<div class="reading off wide"><div class="what">${what}</div><div class="v">${esc(why)}</div></div>`;
 
 export function envPage(app) {
   let el, last = 0;
@@ -16,39 +28,31 @@ export function envPage(app) {
     mount(root) {
       el = root;
       el.innerHTML = `
-        <h3>The observer <span class="aside" id="env-where"></span></h3>
-        <div id="env-observer"></div>
-        <div class="row"><label class="switch"><input type="checkbox" id="env-follow" ${app.observerFollows ? 'checked' : ''}><span>Follows the point chosen <small>a click on any body moves the observer and its instruments there</small></span></label></div>
-        <div id="env-picked"></div>
-        <h3>The air <span class="aside" id="env-air-prov"></span></h3>
+        <div id="env-where"></div>
+        <h3>Air <span class="aside" id="env-air-prov"></span></h3>
         <div id="env-air"></div>
         <div class="charts-2"><div id="env-temperature"></div><div id="env-pressure"></div></div>
-        <h3>The ground and gravity</h3>
+        <h3>Ground and gravity</h3>
         <div id="env-ground"></div>
-        <h3>The magnetic field <span class="aside" id="env-field-prov"></span></h3>
-        <div class="charts-2"><div id="env-compass"></div><div id="env-field"></div></div>
-        <h3>The Sun and the sky <span class="aside" id="env-sky-prov"></span></h3>
-        <div class="skyplot-box" id="env-skyplot"></div><div id="env-sun"></div>
-        <h3>Radiation and space weather <span class="aside">the present, physical</span></h3>
+        <h3>Magnetic field <span class="aside"><button type="button" class="link" id="env-field-cube">the field about the observer</button></span></h3>
+        <div id="env-field"></div>
+        <div class="charts-2"><div id="env-compass"></div><div id="env-field-note"></div></div>
+        <h3>Sun and sky <span class="aside" id="env-sky-prov"></span></h3>
+        <div id="env-sun"></div>
+        <div class="skyplot-box" id="env-skyplot"></div>
+        <h3>Space weather <span class="aside">the present, observed</span></h3>
         <div id="env-weather"></div>
         <h3>Navigation</h3>
         <div id="env-nav"></div>
-        <h3>Elsewhere <span class="aside">other mounts</span></h3>
+        <h3>Other mounts <span class="aside">read elsewhere</span></h3>
         <div id="env-elsewhere"></div>`;
-      page.bind();
-    },
-    show() { page.render(true); },
-    bind() {
-      el.addEventListener('change', (e) => {
-        if (e.target.id !== 'env-follow') return;
-        app.setObserverFollows(e.target.checked);
-        if (e.target.checked && app.picked && app.picked.address !== app.observer) app.setObserver(app.picked.canonical || app.picked.address);
-        page.render(true);
-      });
       el.addEventListener('click', (e) => {
         if (e.target.id === 'env-observe-picked' && app.picked) app.setObserver(app.picked.canonical || app.picked.address);
+        if (e.target.id === 'env-field-cube') app.openField?.('observer');
+        if (e.target.id === 'env-go-observer' && app.observer) app.goTo(app.observer);
       });
     },
+    show() { page.render(true); },
     onReadings() { if (app.isShown('ENV')) page.render(false); },
     render(force) {
       const now = performance.now();
@@ -58,36 +62,33 @@ export function envPage(app) {
       const r = (id) => bus.get(id);
       const v = (id) => bus.values(id);
       const age = (x) => (x?.measured_unix ? `${duration(Date.now() / 1000 - x.measured_unix)} ago` : x?.tt_s !== undefined ? 'at the world\'s instant' : '');
-      const why = (x) => (x && x.available === false ? `<p class="note">${esc(x.title || x.sensor)}: ${esc(x.reason)}</p>` : '');
 
-      // The observer.
-      const pos = v('observer.position'), place = r('observer.position')?.place;
+      // Which place these readings describe.
+      const place = r('observer.position')?.place, pos = v('observer.position');
       const terrain = r('terrain.probe');
-      el.querySelector('#env-where').textContent = pos?.body ? `on ${pos.body}` : '';
-      // A point chosen elsewhere, when the observer does not follow it.
       const picked = app.picked, chosen = picked?.canonical || picked?.address;
-      el.querySelector('#env-picked').innerHTML = !app.observerFollows && chosen && chosen !== app.observer
-        ? `<p class="note">The point chosen, <span class="address" data-text="${esc(chosen)}">${esc(chosen)}</span>, is not the observer. <button type="button" class="key small" id="env-observe-picked">Observe from it</button></p>` : '';
-      el.querySelector('#env-observer').innerHTML = `<div class="address" data-text="${esc(app.observer)}">${esc(app.observer || '—')}</div>
-        <table><tbody>
-        ${place ? `<tr><th>Place</th><td class="num">${latText(place.latitude_deg, 5)}, ${lonText(place.longitude_deg, 5)}<small>${fmt(place.height_m, 1)} m above the figure</small></td></tr>` : ''}
-        ${terrain?.available ? `<tr><th>Ground beneath ${provenanceTag(terrain.provenance)}</th><td class="num">${fmt(terrain.values.height_m, 1)} m<small>${esc(terrain.values.datum)}, ${fmt(terrain.values.resolution_m, 0)} m data; ${esc((terrain.values.sources || []).join(', ')).slice(0, 120)}</small></td></tr>` : ''}
-        </tbody></table>${why(terrain)}`;
+      const same = chosen && chosen === app.observer;
+      const bodyName = pos?.body ? (app.scene.bodies[pos.body]?.name || pos.body) : '';
+      el.querySelector('#env-where').innerHTML = `<div class="where">${OBSERVER_GLYPH}<div>
+          <div class="what">These readings describe the observer${bodyName ? `, on ${esc(bodyName)}` : ''}</div>
+          <div class="place">${place ? `${latText(place.latitude_deg, 4)}, ${lonText(place.longitude_deg, 4)}` : esc(app.observer || '—')}</div></div>
+          <div class="more">${[place ? `${fmt(place.height_m, 1)} m above the figure${terrain?.available ? `, the ground ${fmt(terrain.values.height_m, 1)} m (${esc(terrain.values.datum)})` : ''}` : '',
+            same ? 'the point chosen' : chosen ? `not the point chosen: <button type="button" class="link" id="env-observe-picked">observe from the point</button>` : '',
+            '<button type="button" class="link" id="env-go-observer">go there</button>'].filter(Boolean).join(' · ')}</div></div>`;
 
       // The air.
       const atm = r('observer.atmosphere'), sonde = r('observer.radiosonde');
-      el.querySelector('#env-air-prov').innerHTML = atm ? provenanceTag(atm.provenance) : '';
+      el.querySelector('#env-air-prov').innerHTML = atm ? `${provenanceTag(atm.provenance)} <small>${esc(age(atm))}</small>` : '';
       if (atm?.available) {
         const a = atm.values;
-        el.querySelector('#env-air').innerHTML = `<table><tbody>
-          <tr><th>Pressure</th><td class="num">${fmt(a.pressure_Pa / 100, 2)} hPa</td></tr>
-          <tr><th>Temperature</th><td class="num">${fmt(a.temperature_K, 2)} K <small>${fmt(a.temperature_K - 273.15, 2)} °C</small></td></tr>
-          <tr><th>Density</th><td class="num">${fmt(a.density_kg_m3, 4)} kg/m³</td></tr>
-          <tr><th>Speed of sound</th><td class="num">${fmt(a.speed_of_sound_m_s, 1)} m/s</td></tr>
-          <tr><th>Layer</th><td>${esc(a.layer)} <small>at ${fmt(a.height_msl_m, 1)} m above mean sea level (${esc(a.height_datum)})</small></td></tr>
-          </tbody></table><p class="note">The U.S. Standard Atmosphere 1976: the idealised mean of the mid-latitudes, not today's weather.</p>`;
+        el.querySelector('#env-air').innerHTML = `<div class="readings">
+          ${tile('Pressure', fmt(a.pressure_Pa / 100, 2), 'hPa', { sub: `scale height ${fmt(a.pressure_scale_height_m / 1e3, 2)} km` })}
+          ${tile('Temperature', fmt(a.temperature_K, 2), 'K', { sub: `${fmt(a.temperature_K - 273.15, 2)} °C` })}
+          ${tile('Density', fmt(a.density_kg_m3, 4), 'kg/m³', { sub: `speed of sound ${fmt(a.speed_of_sound_m_s, 1)} m/s` })}
+          ${tile('Layer', esc(a.layer), '', { text: true, sub: `at ${fmt(a.height_msl_m, 0)} m above mean sea level (${esc(a.height_datum)})` })}
+          </div><p class="note">The U.S. Standard Atmosphere 1976: the idealised mean of the mid-latitudes, not today's weather.</p>`;
       } else {
-        el.querySelector('#env-air').innerHTML = atm ? `<p class="note">${esc(atm.reason || 'no reading')}</p>` : '<p class="note">waiting for the barometer</p>';
+        el.querySelector('#env-air').innerHTML = `<div class="readings">${off('The barometer and thermometer', atm ? atm.reason || 'no reading' : 'waiting for the barometer')}</div>`;
       }
       if (sonde?.available) {
         const L = sonde.values.levels, layers = sonde.values.layers || [];
@@ -98,54 +99,59 @@ export function envPage(app) {
           tick: (t) => `10${String(Math.round(Math.log10(t))).replace(/\d|-/g, (c) => '⁰¹²³⁴⁵⁶⁷⁸⁹'['0123456789'.indexOf(c)] ?? '⁻')}`, format: (x) => `${fmt(x / 100, 3)} hPa` });
       } else {
         el.querySelector('#env-temperature').innerHTML = '';
-        el.querySelector('#env-pressure').innerHTML = sonde && sonde.available === false ? `<p class="note">${esc(sonde.reason)}</p>` : '';
+        el.querySelector('#env-pressure').innerHTML = '';
       }
 
       // The ground and gravity.
       const g = r('observer.gravity');
-      el.querySelector('#env-ground').innerHTML = g?.available ? `<table><tbody>
-        <tr><th>Gravity ${provenanceTag(g.provenance)}</th><td class="num">${fmt(g.values.gravity_m_s2, 6)} m/s²<small>${esc(g.values.model)}</small></td></tr>
-        <tr><th>Its deflection</th><td class="num">${fmt(g.values.deflection_deg * 3600, 3)}″ from the figure's normal</td></tr></tbody></table>` : why(g) || '<p class="note">waiting for the gravimeter</p>';
+      el.querySelector('#env-ground').innerHTML = `<div class="readings">
+        ${terrain?.available ? tile(`Ground beneath`, fmt(terrain.values.height_m, 1), 'm', { prov: provenanceTag(terrain.provenance), sub: `${esc(terrain.values.datum)}; ${fmt(terrain.values.resolution_m, 0)} m data` }) : terrain ? off('Ground beneath', terrain.reason || '') : ''}
+        ${g?.available ? tile('Gravity', fmt(g.values.gravity_m_s2, 5), 'm/s²', { prov: provenanceTag(g.provenance), sub: `deflection ${fmt(g.values.deflection_deg * 3600, 2)}″ · ${esc(g.values.model)}` }) : off('Gravity', g?.reason || 'waiting for the gravimeter')}
+        </div>`;
 
-      // The magnetic field: the compass is an instrument of its own, reading only near the Earth's
-      // ground and outside the blackout zones; the magnetometers read wherever their models hold.
+      // The magnetic field: the Earth's (WMM2025) or the Moon's (its crust and the solar wind).
       const m = r('observer.magnetometer'), compass = r('observer.compass'), lunar = r('observer.moon_magnetometer');
-      el.querySelector('#env-field-prov').innerHTML = m?.available ? provenanceTag(m.provenance) : lunar?.available ? provenanceTag(lunar.provenance) : '';
+      const field = el.querySelector('#env-field'), note = el.querySelector('#env-field-note');
+      if (lunar?.available) {
+        const f = lunar.values;
+        field.innerHTML = `<div class="readings">
+          ${tile('|B|', fmt(nT(f.total_T), 2), 'nT', { big: true, prov: provenanceTag(lunar.provenance), sub: `the crust ${fmt(nT(f.crustal_T), 2)} nT (T2015_449, to degree 449)` })}
+          ${tile('North, east, down', `${fmt(nT(f.north_T), 1)}, ${fmt(nT(f.east_T), 1)}, ${fmt(nT(f.down_T), 1)}`, 'nT', { sub: `inclination ${fmt(f.inclination_deg, 1)}°, declination ${fmt(f.declination_deg, 1)}°` })}
+          ${f.small_scales_T !== undefined ? tile('Finer scales', fmt(nT(f.small_scales_T), 2), 'nT', { sub: `synthetic, from the crust's spectral law to degree ${f.small_scales_degree}` }) : ''}
+          ${tile('The solar wind\'s', f.external_T !== undefined ? fmt(nT(f.external_T), 2) : '—', f.external_T !== undefined ? 'nT' : '', { sub: f.external_T !== undefined ? `measured at L1 by ${esc(f.external_spacecraft || 'SWPC')} ${duration(f.delay_s)} before` : esc(f.external_note || 'not included') })}
+          </div>${f.note ? `<p class="note">${esc(f.note)}.</p>` : ''}`;
+        note.innerHTML = '<p class="note">The Moon has no global field: a magnetometer there reads the remanence of its crust and the field the solar wind carries past it.</p>';
+      } else if (m?.available) {
+        const f = m.values;
+        field.innerHTML = `<div class="readings">
+          ${tile('|B|, the total field F', fmt(nT(f.total_T), 0), 'nT', { big: true, wide: true, prov: provenanceTag(m.provenance), sub: `change ${fmt(nT(f.total_T_per_year), 1)} nT a year · WMM2025, the core's field` })}
+          ${tile('North X, east Y', `${fmt(nT(f.north_T), 0)}, ${fmt(nT(f.east_T), 0)}`, 'nT')}
+          ${tile('Down Z', fmt(nT(f.down_T), 0), 'nT', { sub: `horizontal H ${fmt(nT(f.horizontal_T), 0)} nT` })}
+          ${tile('Declination D', fmt(f.declination_deg, 2), '°', { sub: `± ${fmt(f.declination_uncertainty_deg, 2)}° (the model's error)` })}
+          ${tile('Inclination I', fmt(f.inclination_deg, 2), '°', { sub: `dipole latitude ${fmt(f.geomagnetic_latitude_deg, 1)}°, L ${fmt(f.l_shell, 2)}` })}
+          </div>`;
+        note.innerHTML = `<p class="note">A compass here: <span class="status ${f.zone === 'reliable' ? 'good' : f.zone === 'caution' ? 'warning' : 'critical'}">${esc(f.zone)}</span>. The crust's, the ionosphere's and the magnetosphere's fields are not in the model.</p>`;
+      } else {
+        const reasons = [m, lunar].filter(Boolean).map((x) => off(esc(x.title || x.family), x.reason || ''));
+        field.innerHTML = `<div class="readings">${reasons.join('') || off('The magnetometers', 'waiting for them')}</div>`;
+        note.innerHTML = '';
+      }
       if (compass?.available) {
         const c = compass.values;
         compassRose(el.querySelector('#env-compass'), { declination: c.magnetic_north_deg, inclination: c.dip_deg, zone: c.zone });
       } else {
-        el.querySelector('#env-compass').innerHTML = compass ? `<p class="note">The compass ${compass.quality === 'invalid' ? 'does not settle' : 'does not read here'}: ${esc(compass.reason || '')}</p>`
-          : '<p class="note">waiting for the compass</p>';
-      }
-      if (lunar?.available) {
-        const f = lunar.values, nT = 1e9;
-        el.querySelector('#env-field').innerHTML = `<table><tbody>
-          <tr><th>F</th><td class="num">${fmt(f.total_T * nT, 2)} nT<small>the crust's ${fmt(f.crustal_T * nT, 2)} nT (T2015_449, to degree 449)</small></td></tr>
-          ${f.small_scales_T !== undefined ? `<tr><th>Finer scales</th><td class="num">${fmt(f.small_scales_T * nT, 2)} nT<small>synthetic: the power the model lacks below the crust's spectral law, to degree ${f.small_scales_degree}</small></td></tr>` : ''}
-          <tr><th>N, E, D</th><td class="num">${fmt(f.north_T * nT, 2)}, ${fmt(f.east_T * nT, 2)}, ${fmt(f.down_T * nT, 2)} nT</td></tr>
-          <tr><th>The solar wind's</th><td class="num">${f.external_T !== undefined ? `${fmt(f.external_T * nT, 2)} nT<small>measured at L1 by ${esc(f.external_spacecraft || 'SWPC')} ${duration(f.delay_s)} before</small>` : `<small>${esc(f.external_note || 'not included')}</small>`}</td></tr>
-          <tr><th>Its sources</th><td>${Object.entries(f.provenance_of_parts || {}).map(([k, p]) => `${esc(k.replace('_', ' '))} <small>${esc(p)}</small>`).join(', ')}</td></tr></tbody></table>
-          ${f.note ? `<p class="note">${esc(f.note)}.</p>` : ''}
-          <p class="note">The Moon has no global field: what a magnetometer there reads is the remanence of its crust and the field the solar wind carries past it.</p>`;
-      } else if (m?.available) {
-        const f = m.values, nT = 1e9;
-        el.querySelector('#env-field').innerHTML = `<table><tbody>
-          <tr><th>F</th><td class="num">${fmt(f.total_T * nT, 0)} nT</td></tr>
-          <tr><th>H, Z</th><td class="num">${fmt(f.horizontal_T * nT, 0)}, ${fmt(f.down_T * nT, 0)} nT</td></tr>
-          <tr><th>D</th><td class="num">${fmt(f.declination_deg, 2)}° ± ${fmt(f.declination_uncertainty_deg, 2)}°</td></tr>
-          <tr><th>I</th><td class="num">${fmt(f.inclination_deg, 2)}°</td></tr>
-          <tr><th>A compass</th><td><span class="status ${f.zone === 'reliable' ? 'good' : f.zone === 'caution' ? 'warning' : 'critical'}">${esc(f.zone)}</span></td></tr>
-          <tr><th>Dipole</th><td class="num">λₘ ${fmt(f.geomagnetic_latitude_deg, 1)}°, L ${fmt(f.l_shell, 2)}</td></tr></tbody></table>`;
-      } else {
-        // Neither magnetometer reads here: say why each does not.
-        const reasons = [m, lunar].filter(Boolean).map((x) => `<p class="note">${esc(x.title || x.family)}: ${esc(x.reason || '')}</p>`);
-        el.querySelector('#env-field').innerHTML = reasons.join('') || '<p class="note">waiting for the magnetometers</p>';
+        el.querySelector('#env-compass').innerHTML = compass && !lunar?.available ? `<p class="note">The compass ${compass.quality === 'invalid' ? 'does not settle' : 'does not read here'}: ${esc(compass.reason || '')}</p>` : '';
       }
 
-      // The sky: the bodies and the GNSS satellites.
+      // The Sun and the sky: the bodies and the GNSS satellites.
       const sky = v('observer.sky'), gnss = r('observer.gnss'), sun = r('observer.sun');
       el.querySelector('#env-sky-prov').innerHTML = sun ? provenanceTag(sun.provenance) : '';
+      el.querySelector('#env-sun').innerHTML = sun?.available ? `<div class="readings">
+        ${sun.values.elevation_deg !== undefined ? tile('Sun\'s elevation', fmt(sun.values.elevation_deg, 2), '°', { sub: `azimuth ${fmt(sun.values.azimuth_deg, 2)}°` }) : ''}
+        ${tile('Irradiance', fmt(sun.values.irradiance_w_m2, 1), 'W/m²', { sub: sun.values.horizontal_irradiance_w_m2 !== undefined ? `on the level ${fmt(sun.values.horizontal_irradiance_w_m2, 1)} W/m², above the air` : 'facing the Sun, above any air' })}
+        ${tile('Disc seen', fmt(sun.values.disc_visible * 100, 1), '%', { sub: Object.keys(sun.values.hidden_by || {}).length ? `hidden by ${esc(Object.keys(sun.values.hidden_by).join(', '))}: an eclipse` : 'nothing hides it' })}
+        ${tile('Distance', fmt(sun.values.distance_m / 1.495978707e11, 6), 'au')}
+        </div>` : `<div class="readings">${off('The Sun sensor', sun?.reason || 'waiting for it')}</div>`;
       const items = [];
       for (const b of sky?.bodies || []) {
         const colour = b.body === 'sun' ? 'var(--status-warning)' : b.body === 'moon' ? 'var(--ink-2)' : b.body === 'earth' ? 'var(--prov-model)' : 'var(--orchid)';
@@ -157,11 +163,6 @@ export function envPage(app) {
           shape: s.constellation === 'galileo' ? 'triangle' : 'circle' });
       }
       skyplot(el.querySelector('#env-skyplot'), items, { title: 'The sky', legend: gnss?.available ? [{ colour: 'var(--gnss-gps)', label: 'GPS' }, { colour: 'var(--gnss-galileo)', label: 'Galileo' }] : [] });
-      el.querySelector('#env-sun').innerHTML = sun?.available ? `<table><tbody>
-        <tr><th>Sun</th><td class="num">el ${fmt(sun.values.elevation_deg, 2)}°<small>az ${fmt(sun.values.azimuth_deg, 2)}°</small></td></tr>
-        <tr><th>Its disc</th><td class="num">${fmt(sun.values.disc_visible * 100, 1)}% seen${Object.keys(sun.values.hidden_by || {}).length ? `<small>hidden by ${esc(Object.keys(sun.values.hidden_by).join(', '))}: an eclipse</small>` : ''}</td></tr>
-        <tr><th>Irradiance</th><td class="num">${fmt(sun.values.irradiance_w_m2, 1)} W/m²<small>on the level: ${fmt(sun.values.horizontal_irradiance_w_m2 ?? NaN, 1)} W/m², above the air</small></td></tr>
-        <tr><th>Distance</th><td class="num">${fmt(sun.values.distance_m / 1.495978707e11, 6)} au</td></tr></tbody></table>` : why(sun);
 
       // Space weather: the present's physical instruments.
       const wind = r('swpc.wind'), imf = r('swpc.imf'), kp = r('swpc.kp'), xr = r('goes.xray'), pr = r('goes.protons');
@@ -181,24 +182,23 @@ export function envPage(app) {
       const nav = [];
       if (gnss?.available) {
         const gv = gnss.values;
-        nav.push(`<tr><th>GNSS ${provenanceTag(gnss.provenance)}</th><td class="num">${fmt(gv.in_view?.['gps-ops'] ?? 0, 0)} GPS, ${fmt(gv.in_view?.galileo ?? 0, 0)} Galileo in view<small>above ${fmt(gv.mask_deg, 0)}°</small></td></tr>`);
-        if (gv.fix) nav.push(`<tr><th>Dilution</th><td class="num">PDOP ${fmt(gv.pdop, 2)}, HDOP ${fmt(gv.hdop, 2)}, VDOP ${fmt(gv.vdop, 2)}</td></tr>
-          <tr><th>Simulated fix</th><td class="num">${fmt(Math.hypot(gv.error_m[0], gv.error_m[1]), 2)} m across, ${fmt(gv.error_m[2], 2)} m up<small>from σ = ${fmt(gv.sigma_uere_m, 1)} m times the dilution (a declared error, not the signals')</small></td></tr>`);
-        else nav.push(`<tr><th>Fix</th><td>${esc(gv.reason || 'none')}</td></tr>`);
-      } else if (gnss) nav.push(`<tr><th>GNSS</th><td class="note">${esc(gnss.reason || '')}</td></tr>`);
-      if (ntp) nav.push(ntp.available ? `<tr><th>This computer's clock ${provenanceTag(ntp.provenance)}</th><td class="num">${fmt(ntp.values.offset_s * 1e3, 1)} ms ${ntp.values.offset_s >= 0 ? 'ahead of' : 'behind'} UTC<small>NTP stratum ${ntp.values.stratum}, round trip ${fmt(ntp.values.delay_s * 1e3, 1)} ms, ${esc(age(ntp))}</small></td></tr>`
-        : `<tr><th>This computer's clock</th><td class="note">${esc(ntp.reason)}</td></tr>`);
-      el.querySelector('#env-nav').innerHTML = `<table><tbody>${nav.join('')}</tbody></table>`;
+        nav.push(tile('GNSS in view', fmt((gv.in_view?.['gps-ops'] ?? 0) + (gv.in_view?.galileo ?? 0), 0), 'satellites', { prov: provenanceTag(gnss.provenance), sub: `${fmt(gv.in_view?.['gps-ops'] ?? 0, 0)} GPS, ${fmt(gv.in_view?.galileo ?? 0, 0)} Galileo above ${fmt(gv.mask_deg, 0)}°` }));
+        if (gv.fix) nav.push(tile('Simulated fix', fmt(Math.hypot(gv.error_m[0], gv.error_m[1]), 2), 'm across', { sub: `${fmt(gv.error_m[2], 2)} m up · PDOP ${fmt(gv.pdop, 2)}, from σ = ${fmt(gv.sigma_uere_m, 1)} m times the dilution` }));
+        else nav.push(off('Fix', gv.reason || 'none'));
+      } else if (gnss) nav.push(off('GNSS', gnss.reason || ''));
+      if (ntp) nav.push(ntp.available ? tile('This computer\'s clock', fmt(ntp.values.offset_s * 1e3, 1), `ms ${ntp.values.offset_s >= 0 ? 'ahead of' : 'behind'} UTC`, { prov: provenanceTag(ntp.provenance), sub: `NTP stratum ${ntp.values.stratum}, round trip ${fmt(ntp.values.delay_s * 1e3, 1)} ms, ${esc(age(ntp))}`, wide: true })
+        : off('This computer\'s clock', ntp.reason));
+      el.querySelector('#env-nav').innerHTML = `<div class="readings">${nav.join('')}</div>`;
 
-      // Elsewhere: the ISS and Tranquility Base.
+      // Elsewhere: the ISS, Tranquility Base and Reiner Gamma.
       const iss = r('iss.sun'), issPos = r('iss.position'), issMag = r('iss.magnetometer');
       const tq = r('tranquility.sun'), tqSky = v('tranquility.sky'), tqG = r('tranquility.gravity');
       const earthThere = tqSky?.bodies?.find((b) => b.body === 'earth');
       const tqB = r('tranquility.magnetometer'), rg = r('reiner_gamma.magnetometer'), rg30 = r('reiner_gamma.30km');
-      const lunarRow = (x, name, place) => (x?.available ? `<tr><th>${name}<small>${place}</small></th><td class="num">F ${fmt(x.values.total_T * 1e9, 2)} nT${provenanceTag(x.provenance)}<small>the crust ${fmt(x.values.crustal_T * 1e9, 2)} nT${x.values.small_scales_T !== undefined ? `, finer scales ${fmt(x.values.small_scales_T * 1e9, 2)} nT (synthetic)` : ''}${x.values.external_T !== undefined ? `, the solar wind ${fmt(x.values.external_T * 1e9, 2)} nT` : x.values.in_magnetotail ? ', in the Earth\'s magnetotail' : ''}</small></td></tr>` : '');
+      const lunarRow = (x, place) => (x?.available ? `<tr><th>${place}<small>magnetometer</small></th><td class="num">${fmt(nT(x.values.total_T), 2)} nT ${provenanceTag(x.provenance)}<small>the crust ${fmt(nT(x.values.crustal_T), 2)} nT${x.values.small_scales_T !== undefined ? `, finer scales ${fmt(nT(x.values.small_scales_T), 2)} nT (synthetic)` : ''}${x.values.external_T !== undefined ? `, the solar wind ${fmt(nT(x.values.external_T), 2)} nT` : x.values.in_magnetotail ? ', in the Earth\'s magnetotail' : ''}</small></td></tr>` : '');
       el.querySelector('#env-elsewhere').innerHTML = `<table><tbody>
-        ${iss?.available ? `<tr><th>The ISS</th><td class="num">${iss.values.disc_visible > 0.999 ? 'in sunlight' : iss.values.disc_visible < 0.001 ? 'in the Earth\'s shadow' : `${fmt(iss.values.disc_visible * 100, 0)}% of the Sun`}${issPos?.available ? `<small>${fmt(issPos.values.height_m / 1e3, 1)} km up</small>` : ''}${issMag?.available ? `<small>F ${fmt(issMag.values.total_T * 1e9, 0)} nT, L ${fmt(issMag.values.l_shell, 2)}</small>` : ''}</td></tr>` : ''}
-        ${lunarRow(tqB, 'Magnetometer', 'Tranquility Base')}${lunarRow(rg, 'Magnetometer', 'Reiner Gamma, with finer scales')}${lunarRow(rg30, 'Magnetometer', '30 km over Reiner Gamma')}
+        ${iss?.available ? `<tr><th>The ISS<small>${issPos?.available ? `${fmt(issPos.values.height_m / 1e3, 1)} km up` : ''}</small></th><td class="num">${iss.values.disc_visible > 0.999 ? 'in sunlight' : iss.values.disc_visible < 0.001 ? 'in the Earth\'s shadow' : `${fmt(iss.values.disc_visible * 100, 0)}% of the Sun`}${issMag?.available ? `<small>|B| ${fmt(nT(issMag.values.total_T), 0)} nT, L ${fmt(issMag.values.l_shell, 2)}</small>` : ''}</td></tr>` : ''}
+        ${lunarRow(tqB, 'Tranquility Base')}${lunarRow(rg, 'Reiner Gamma')}${lunarRow(rg30, '30 km over Reiner Gamma')}
         ${tq?.available ? `<tr><th>Tranquility Base<small>the Moon</small></th><td class="num">the Sun at ${fmt(tq.values.elevation_deg, 1)}°${earthThere ? `<small>the Earth at az ${fmt(earthThere.azimuth_deg, 1)}°, el ${fmt(earthThere.elevation_deg, 1)}°</small>` : ''}${tqG?.available ? `<small>g ${fmt(tqG.values.gravity_m_s2, 4)} m/s²</small>` : ''}</td></tr>` : ''}
         </tbody></table>`;
     },

@@ -78,6 +78,84 @@ class Registry {
   std::vector<std::unique_ptr<Instrument>> list_;
 };
 
+// Why a family cannot be mounted: declared and not implemented (declared.hpp), or unknown.
+inline std::string unknown_family(const std::string& family) {
+  const std::string code = family.rfind("declared.", 0) == 0 ? family.substr(9) : family;
+  for (const auto& d : declared_families())
+    if (code == d.code) return std::string("the family ") + d.code + " (" + d.title + ") is declared, not implemented: " + d.state;
+  return "no instrument family " + family;
+}
+
+// ---- where a mount is ------------------------------------------------------------------------------------
+
+// The place of a mount at an instant, from its address: "satellite:<NORAD>" by SGP4 on the world's
+// element sets (in the ITRS, near the Earth), or an address of the navigation bridge's language. An
+// address on or near a body with a surface is carried into the body's fixed frame and onto its figure,
+// and stands on the body while it is lower than a twentieth of the figure's equatorial radius above it;
+// any other is in space. `resolved` holds addresses already read (a session's, resolved before its
+// workers run, which then only read it).
+inline MountState mount_state(const World& w, const std::string& text, const mt::Instant& t,
+                              const std::map<std::string, nf::Event>* resolved = nullptr) {
+  MountState m;
+  if (text.empty()) return m;
+  const auto& c = w.catalogue();
+  if (text.rfind("satellite:", 0) == 0) {
+    const int norad = std::stoi(text.substr(10));
+    for (const auto& [group, sets] : w.elements)
+      for (const auto& tle : sets)
+        if (tle.number == norad) {
+          if (!t.has_utc) throw Unavailable("SGP4's elements are in UTC");
+          const navigation::orbits::Sgp4 model(tle);
+          const auto x = model.at(t.utc);
+          if (!std::isfinite(x.position[0])) throw Unavailable("SGP4 fails for " + tle.name + " at this instant");
+          const auto& g = c.graph();
+          m.fixed = g.transform("TEME", "ITRS", t).position(x.position);
+          m.fixed_frame = "ITRS";
+          m.body = "earth";
+          m.on_body = false;
+          m.geodetic = gf::Ellipsoid::wgs84().geodetic(m.fixed);
+          m.gcrs = g.transform("TEME", "GCRS", t).position(x.position);
+          m.icrs = g.transform("TEME", "ICRS", t).position(x.position);
+          m.address = "satellite " + tle.name;
+          return m;
+        }
+    throw Unavailable("no elements are loaded for NORAD " + std::to_string(norad));
+  }
+  const auto it = resolved ? resolved->find(text) : std::map<std::string, nf::Event>::const_iterator{};
+  const nf::Event e = resolved && it != resolved->end() ? it->second : nf::resolve(nf::parse_address(text), c);
+  m.address = text;
+  const auto& g = c.graph();
+  if (!e.body.empty()) {
+    const auto b = nf::body_frames(c, e.body);
+    if (b && b->surface) {
+      const nf::Event f = nf::carry(e, b->fixed, c, t);
+      m.body = e.body;
+      m.fixed = f.position;
+      m.fixed_frame = b->fixed;
+      m.geodetic = b->figure->geodetic(f.position);
+      m.on_body = m.geodetic.height < 0.05 * b->figure->a();
+    }
+  }
+  m.gcrs = g.transform(e.frame, "GCRS", t).position(e.position);
+  m.icrs = g.transform(e.frame, "ICRS", t).position(e.position);
+  return m;
+}
+
+// The solar wind as the server passes it with a step ({"imf_gse": [[tt_s, Bx, By, Bz], …] in tesla,
+// "speed_m_s", "speed_tt_s", "spacecraft"}), its series ascending in time.
+inline SolarWindInputs solar_wind_of(const Json& sw) {
+  SolarWindInputs in;
+  for (std::size_t i = 0; i < sw["imf_gse"].size(); i++) {
+    const Json& row = sw["imf_gse"][i];
+    in.imf_gse.push_back({row[0].as_number(), row[1].as_number(), row[2].as_number(), row[3].as_number()});
+  }
+  std::sort(in.imf_gse.begin(), in.imf_gse.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
+  in.speed_m_s = sw["speed_m_s"].is_number() ? sw["speed_m_s"].as_number() : 0.0;
+  in.speed_tt_s = sw["speed_tt_s"].is_number() ? sw["speed_tt_s"].as_number() : 0.0;
+  in.spacecraft = sw["spacecraft"].text();
+  return in;
+}
+
 inline Json info_json(const InstrumentInfo& i) {
   Json q = Json::array();
   for (const auto& x : i.quantities) q.push(Json::object({{"name", x.name}, {"unit", x.unit}, {"about", x.about}}));
@@ -165,6 +243,8 @@ class Session {
       : world_(w), registry_(r), pool_(std::max<std::size_t>(1, workers)), kernel_(cs::probe_kernel()) {}
 
   std::size_t workers() const { return pool_.size(); }
+  const World& world() const { return world_; }
+  const std::string& observer() const { return observer_; }
 
   // {"sensors": [...], "servers": [...], "policy": {...}, "observer": address} — every field optional.
   Json configure(const Json& r) {
@@ -274,19 +354,7 @@ class Session {
     Json readings = Json::array(), plan = Json::array(), trace = Json::array();
 
     // 0. What physical sources tell the virtual instruments (the solar wind at L1), before dispatch.
-    if (r["inputs"].is_object() && r["inputs"]["solar_wind"].is_object()) {
-      const Json& sw = r["inputs"]["solar_wind"];
-      SolarWindInputs in;
-      for (std::size_t i = 0; i < sw["imf_gse"].size(); i++) {
-        const Json& row = sw["imf_gse"][i];
-        in.imf_gse.push_back({row[0].as_number(), row[1].as_number(), row[2].as_number(), row[3].as_number()});
-      }
-      std::sort(in.imf_gse.begin(), in.imf_gse.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
-      in.speed_m_s = sw["speed_m_s"].is_number() ? sw["speed_m_s"].as_number() : 0.0;
-      in.speed_tt_s = sw["speed_tt_s"].is_number() ? sw["speed_tt_s"].as_number() : 0.0;
-      in.spacecraft = sw["spacecraft"].text();
-      world_.solar_wind = std::move(in);
-    }
+    if (r["inputs"].is_object() && r["inputs"]["solar_wind"].is_object()) world_.solar_wind = solar_wind_of(r["inputs"]["solar_wind"]);
 
     // 1. External readings and events.
     if (r["external"].is_array())
@@ -620,53 +688,11 @@ class Session {
     return Json::object({{"utilisation", u}, {"target", policy_.target}, {"feasible", v.feasible}, {"degraded", degraded}, {"decimation", compressed},
                          {"about", "EDF's demand test on the declared costs over the workers' summed capacity; periods compressed elastically above the target"}});
   }
-  // The mount of a sensor at an instant.
+  // The mount of a sensor at an instant (mounts_ is read only on the workers: step() resolved the
+  // addresses before dispatching).
   MountState mount_at(const SensorSpec& s, const mt::Instant& t) const {
-    MountState m;
+    MountState m = mount_state(world_, s.mount == "observer" ? observer_ : s.mount, t, &mounts_);
     m.settings = s.settings;
-    const std::string text = s.mount == "observer" ? observer_ : s.mount;
-    if (text.empty()) return m;
-    const auto& c = world_.catalogue();
-    if (text.rfind("satellite:", 0) == 0) {
-      const int norad = std::stoi(text.substr(10));
-      for (const auto& [group, sets] : world_.elements)
-        for (const auto& tle : sets)
-          if (tle.number == norad) {
-            if (!t.has_utc) throw Unavailable("SGP4's elements are in UTC");
-            const navigation::orbits::Sgp4 model(tle);
-            const auto x = model.at(t.utc);
-            if (!std::isfinite(x.position[0])) throw Unavailable("SGP4 fails for " + tle.name + " at this instant");
-            const auto& g = c.graph();
-            m.fixed = g.transform("TEME", "ITRS", t).position(x.position);
-            m.fixed_frame = "ITRS";
-            m.body = "earth";
-            m.on_body = false;
-            m.geodetic = gf::Ellipsoid::wgs84().geodetic(m.fixed);
-            m.gcrs = g.transform("TEME", "GCRS", t).position(x.position);
-            m.icrs = g.transform("TEME", "ICRS", t).position(x.position);
-            m.address = "satellite " + tle.name;
-            return m;
-          }
-      throw Unavailable("no elements are loaded for NORAD " + std::to_string(norad));
-    }
-    // Read only on the workers: step() resolved the addresses before dispatching.
-    const auto it = mounts_.find(text);
-    const nf::Event e = it != mounts_.end() ? it->second : nf::resolve(nf::parse_address(text), c);
-    m.address = text;
-    const auto& g = c.graph();
-    if (!e.body.empty()) {
-      const auto b = nf::body_frames(c, e.body);
-      if (b && b->surface) {
-        const nf::Event f = nf::carry(e, b->fixed, c, t);
-        m.body = e.body;
-        m.fixed = f.position;
-        m.fixed_frame = b->fixed;
-        m.geodetic = b->figure->geodetic(f.position);
-        m.on_body = m.geodetic.height < 0.05 * b->figure->a();
-      }
-    }
-    m.gcrs = g.transform(e.frame, "GCRS", t).position(e.position);
-    m.icrs = g.transform(e.frame, "ICRS", t).position(e.position);
     return m;
   }
   // One job: the reading of an internal sensor at its tick, or why there is none.
@@ -712,14 +738,6 @@ class Session {
     for (const auto& q : info.quantities) if (!q.unit.empty()) units.set(q.name, q.unit);
     x.set("units", units);
     return x;
-  }
-
-  // Why a family cannot be mounted: declared and not implemented (declared.hpp), or unknown.
-  static std::string unknown_family(const std::string& family) {
-    const std::string code = family.rfind("declared.", 0) == 0 ? family.substr(9) : family;
-    for (const auto& d : declared_families())
-      if (code == d.code) return std::string("the family ") + d.code + " (" + d.title + ") is declared, not implemented: " + d.state;
-    return "no instrument family " + family;
   }
 
   // Raise the workers to SCHED_FIFO where the policy asks and the kernel permits, and back otherwise.

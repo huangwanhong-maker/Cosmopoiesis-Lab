@@ -360,8 +360,7 @@ void main() {
   // hideBelow: not drawn when the camera is nearer than this to a body's ground (m); group: an option
   // that hides the feature when false (as 'orbits').
   setFeature(key, frame, points, { kind = 'path', colour = 0xe889b8, size = 7, opacity = 1, depthTest = null, hideBelow = 0, group = null } = {}) {
-    const old = this.features.get(key);
-    if (old) { this.scene.remove(old.object); old.object.geometry.dispose(); old.object.material.dispose(); this.features.delete(key); }
+    this.drop(key);
     if (!points || !points.length) { this.onChange(); return; }
     const centre = points[0];
     const position = new Float32Array(points.length * 3);
@@ -384,11 +383,35 @@ void main() {
     this.onChange();
   }
 
+  // Any three.js object in a frame (frameOf), at a point of it (m), turned and scaled by its own matrix
+  // within the frame's axes; null removes it. The field's cube is one (cube.js, worldCube).
+  setObject(key, frame, centre, object, { hideBelow = 0, group = null } = {}) {
+    this.drop(key);
+    if (!object) { this.onChange(); return; }
+    const holder = new THREE.Group();
+    holder.matrixAutoUpdate = false;
+    holder.add(object);
+    holder.traverse((o) => { o.frustumCulled = false; });
+    holder.renderOrder = 2;
+    this.scene.add(holder);
+    this.features.set(key, { frame, centre, object: holder, hideBelow, group });
+    this.onChange();
+  }
+
+  // A feature removed, its geometries and materials freed.
+  drop(key) {
+    const f = this.features.get(key);
+    if (!f) return;
+    this.scene.remove(f.object);
+    f.object.traverse((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+    this.features.delete(key);
+  }
+
   // Many moving points (the satellites): a buffer refilled each frame, in a frame (frameOf).
   setPoints(key, frame, count, { positions = null, colours = null, size = 6 } = {}) {
     let f = this.features.get(key);
     if (!count) {
-      if (f) { this.scene.remove(f.object); f.object.geometry.dispose(); f.object.material.dispose(); this.features.delete(key); }
+      if (f) this.drop(key);
       return;
     }
     if (!f || f.capacity < count) {

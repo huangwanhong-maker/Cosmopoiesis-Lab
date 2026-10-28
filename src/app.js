@@ -7,8 +7,14 @@
 // The instruments read the world at the clock's ticks on the server (runtime.py; the engine's
 // acquisition session), and their readings reach the page on the bus (busclient.js), where the
 // displays' pages show them by provenance. A point anywhere is written, read and answered in the
-// language of addresses (the address line; the NAV page). Nothing pops up: the console's lamps and
+// language of addresses (the address line; the POINT page). Nothing pops up: the console's lamps and
 // its log say what changes (console.js).
+//
+// Five things are kept apart and always shown, in the context bar beneath the clocks (decision 0006):
+// what the camera looks at (the view), the point chosen (rose, in the world and on every display),
+// the observer whose instruments read the environment (orchid), the frame positions are written in,
+// and where the instruments are mounted. The science deck studies the point and its environment; the
+// engineering deck shows the machinery.
 
 import * as THREE from 'three';
 import { globe } from '../../../visualization/js/index.js';
@@ -25,7 +31,8 @@ import { Gazetteer, parseCoordinates } from './places.js';
 import { SatelliteLayer } from './satellites.js';
 import { Scene } from './scene.js';
 import { WorldMotion } from './world.js';
-import { navPage, viewAddress } from './pages/nav.js';
+import { EXAMPLES, nearestPlace, pointPage } from './pages/point.js';
+import { fieldPage } from './pages/field.js';
 import { timePage } from './pages/time.js';
 import { framesPage } from './pages/frames.js';
 import { layersPage } from './pages/layers.js';
@@ -83,6 +90,7 @@ function initTheme() {
     const next = document.documentElement.dataset.theme === 'night' ? 'day' : 'night';
     document.documentElement.dataset.theme = next;
     for (const p of ['ENV', 'BUS']) app.pages[p]?.render?.(true);
+    if (app.isShown?.('FIELD')) app.pages.FIELD.draw();
     app.touch?.();
     try { localStorage.setItem('cosmopoiesis-theme', next); } catch { /* none */ }
   });
@@ -157,6 +165,7 @@ app.setObserver = async (text) => {
     app.console.message('caution', `The observer was not moved: ${error.message}`, 'nav');
   }
   app.pages.ENV?.render(true);
+  app.updateContext();
 };
 app.adoptAcquisition = (a) => {
   if (!a) return;
@@ -165,7 +174,8 @@ app.adoptAcquisition = (a) => {
   if (a.observer) app.observer = a.observer;
   if (a.observer_place) app.observerPlace = a.observer_place;
   if (changed) {
-    app.pages.NAV?.showObserver();
+    app.pages.POINT?.showObserver();
+    app.pages.FIELD?.onObserver();
     if (app.satellites) app.satellites.window = null;
     markObserver();
   }
@@ -180,55 +190,94 @@ function markObserver() {
 }
 
 // ---- the address line ----------------------------------------------------------------------------------------
+// Three ways to the same address: a place's name (the gazetteer) or coordinates, typed; an example
+// or the composer (a body, a latitude and longitude, a height, an instant), chosen when the line is
+// empty; or the language of addresses itself, read by the engine as it is typed, whose error says
+// where it stopped, what it expected, and how such an address is written.
 let parseTimer = null;
+function hintFor(expected, text) {
+  const e = String(expected || '');
+  if (/@|instant/.test(e) && /\)\s*[a-z]/i.test(text)) return 'a step from a point follows a slash, as earth(…)/aer(90°, 30°, 400 km); an instant follows @, as … @ now';
+  if (/instant/.test(e)) return 'an instant: @ now, @ 2026-10-29T12:00:00Z, @ JD 2461343.0 TT';
+  if (/coord|NUMBER|number/.test(e)) return 'coordinates: latitude, then longitude, with N S E W or °, and a height with its unit: moon(43.31 S, 11.36 W, 2000 m)';
+  if (/\)/.test(e)) return 'close the coordinates with )';
+  if (/BODY|FRAME|body|frame/.test(e)) return 'begin with a body (earth, moon, mars …) or a frame (ICRS, ITRS, GCRS …), or type a place\'s name';
+  return 'an empty line shows examples';
+}
 function initAddress() {
   const input = $('#address-input'), list = $('#address-results'), echo = $('#address-echo');
-  let results = [], active = 0, parsed = null;
+  let results = [], active = 0;
+  const examplesRows = () => [{ head: 'Examples: click one to put it in the line' }, ...EXAMPLES.map(([text, about]) => ({ example: text, about })), { compose: true }];
   const render = () => {
     list.hidden = results.length === 0;
-    list.innerHTML = results.map((r, i) => `<li data-i="${i}" class="${i === active ? 'active' : ''}"><span>${esc(r.name)}</span><span class="kind">${esc(r.kind)}${r.detail ? ` · ${esc(String(r.detail).slice(0, 34))}` : ''} · ${esc(r.body)}</span></li>`).join('');
+    list.innerHTML = results.map((r, i) => {
+      if (r.head) return `<li class="head">${esc(r.head)}</li>`;
+      if (r.example) return `<li data-i="${i}" class="example ${i === active ? 'active' : ''}"><code>${esc(r.example)}</code><span class="kind">${esc(r.about)}</span></li>`;
+      if (r.compose) {
+        const b = ['earth', 'moon'].includes(app.nav.focus) ? app.nav.focus : 'earth';
+        return `<li class="compose"><span class="kind" style="text-align:left">Or compose one</span><div class="compose-row">
+          <select id="cmp-body">${['earth', 'moon', 'mercury', 'venus', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'pluto', 'sun'].map((k) => `<option value="${k}" ${k === b ? 'selected' : ''}>${esc(app.scene.bodies[k]?.name || k)}</option>`).join('')}</select>
+          <input type="text" id="cmp-lat" placeholder="43.31 S" aria-label="Latitude"><input type="text" id="cmp-lon" placeholder="11.36 W" aria-label="Longitude">
+          <input type="text" id="cmp-h" placeholder="0 m" aria-label="Height"><input type="text" class="wide" id="cmp-at" placeholder="@ now, or an ISO time" aria-label="Instant">
+          <button type="button" class="key small" id="cmp-go">Write it</button></div></li>`;
+      }
+      return `<li data-i="${i}" class="${i === active ? 'active' : ''}"><span>${esc(r.name)}</span><span class="kind">${esc(r.kind)}${r.detail ? ` · ${esc(String(r.detail).slice(0, 34))}` : ''} · ${esc(r.body)}</span></li>`;
+    }).join('');
   };
   const check = async () => {
     const text = input.value.trim();
-    parsed = null;
-    if (!text || results.length && !/[(:]/.test(text)) { echo.innerHTML = results.length ? `${results.length} places` : '—'; return; }
+    if (!text) { echo.innerHTML = '—'; return; }
+    if (results.length && !results[0].example && !/[(:@/]/.test(text)) { echo.innerHTML = `${results.filter((r) => r.name).length} places · ↵ goes to the first`; return; }
     try {
       const a = await engine({ op: 'address', text, time: ttText(app.clock.now()), answers: [] });
-      parsed = a;
-      echo.innerHTML = `<span>${esc(a.display)}</span>`;
+      echo.innerHTML = `<span>${esc(a.display)}</span> · ↵ goes there`;
     } catch (error) {
       const syn = error.body?.syntax;
       if (syn) {
         const col = Math.min(text.length, syn.column);
-        echo.innerHTML = `<span class="bad">${esc(text.slice(0, col))}<span class="caret">▸</span>${esc(text.slice(col))}</span> — expected ${esc(syn.expected)}`;
+        echo.innerHTML = `<span class="bad">${esc(text.slice(0, col))}<span class="caret">▸</span>${esc(text.slice(col))}</span> expected ${esc(syn.expected)} · <span class="hint">${esc(hintFor(syn.expected, text))}</span>`;
       } else {
-        echo.innerHTML = `<span class="bad">${esc(error.message)}</span>`;
+        echo.innerHTML = `<span class="bad">${esc(error.message)}</span> · <span class="hint">${esc(hintFor('', text))}</span>`;
       }
     }
   };
+  input.addEventListener('focus', () => { if (!input.value.trim()) { results = examplesRows(); active = -1; render(); } });
   input.addEventListener('input', () => {
     const c = parseCoordinates(input.value);
     const focus = app.nav.focus;
     results = c ? [{ name: `${latText(c.lat, 4)}, ${lonText(c.lon, 4)}`, lon: c.lon, lat: c.lat, kind: 'coordinates', body: ['earth', 'moon'].includes(focus) ? focus : 'earth' }] : [];
-    if (!/[(:@]/.test(input.value)) results = results.concat(app.gazetteer.search(input.value, ['earth', 'moon'].includes(focus) ? focus : 'earth'));
-    active = 0;
+    if (!/[(:@/]/.test(input.value)) results = results.concat(app.gazetteer.search(input.value, ['earth', 'moon'].includes(focus) ? focus : 'earth'));
+    if (!input.value.trim()) results = examplesRows();
+    active = results[0]?.head ? -1 : 0;
     render();
     clearTimeout(parseTimer);
     parseTimer = setTimeout(check, 220);
   });
+  list.addEventListener('click', (e) => {
+    if (e.target.id !== 'cmp-go') return;
+    const v = (id) => list.querySelector(`#${id}`).value.trim();
+    const coord = (t, pos, neg) => (/[NSEW]$/i.test(t) ? t.toUpperCase() : t ? (Number(t) < 0 ? `${Math.abs(Number(t))} ${neg}` : `${Number(t)} ${pos}`) : '');
+    const lat = coord(v('cmp-lat'), 'N', 'S'), lon = coord(v('cmp-lon'), 'E', 'W'), h = v('cmp-h'), at = v('cmp-at').replace(/^@\s*/, '');
+    const coords = lat && lon ? `(${lat}, ${lon}${h ? `, ${/[a-z]$/i.test(h) ? h : `${h} m`}` : ''})` : '';
+    app.putAddress(`${v('cmp-body')}${coords}${at ? ` @ ${at}` : ''}`);
+    e.stopPropagation();
+  });
   input.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowDown') { active = Math.min(results.length - 1, active + 1); render(); e.preventDefault(); }
-    if (e.key === 'ArrowUp') { active = Math.max(0, active - 1); render(); e.preventDefault(); }
+    const pickable = (i) => results[i] && !results[i].head && !results[i].compose;
+    if (e.key === 'ArrowDown') { let i = active + 1; while (i < results.length && !pickable(i)) i++; if (pickable(i)) active = i; render(); e.preventDefault(); }
+    if (e.key === 'ArrowUp') { let i = active - 1; while (i >= 0 && !pickable(i)) i--; if (pickable(i)) active = i; render(); e.preventDefault(); }
     if (e.key === 'Escape') { results = []; render(); }
   });
   $('#address').addEventListener('submit', async (e) => {
     e.preventDefault();
     const text = input.value.trim();
-    if (/[(:]/.test(text) || /^(sun|mercury|venus|earth|moon|mars|jupiter|saturn|uranus|neptune|pluto|ssb|galaxy)\b/i.test(text) && !results.length) {
+    const chosen = results[active];
+    if (chosen?.example) { app.putAddress(chosen.example); return; }
+    if (/[(:/@]/.test(text) || /^(sun|mercury|venus|earth|moon|mars|jupiter|saturn|uranus|neptune|pluto|ssb|galaxy)\b/i.test(text) && !results.length) {
       results = []; render();
       await goToAddress(text);
-    } else if (results[active]) {
-      flyToPlace(results[active]);
+    } else if (chosen?.name) {
+      flyToPlace(chosen);
       results = []; render();
       input.blur();
     } else if (text) {
@@ -236,9 +285,11 @@ function initAddress() {
     }
   });
   list.addEventListener('click', (e) => {
-    const li = e.target.closest('li');
+    const li = e.target.closest('li[data-i]');
     if (!li) return;
-    flyToPlace(results[Number(li.dataset.i)]);
+    const r = results[Number(li.dataset.i)];
+    if (r?.example) { app.putAddress(r.example); return; }
+    flyToPlace(r);
     results = []; render();
   });
   document.addEventListener('click', (e) => { if (!e.target.closest('#address')) { results = []; render(); } });
@@ -274,8 +325,9 @@ async function goToAddress(text) {
     if (onBody && Math.abs(onBody.values.height_m) < 0.5 * app.scene.bodies[e.body].fig.a) {
       const h = onBody.values.height_m;
       app.nav.flyToBody(e.body, { lon: onBody.values.longitude_deg * DEG, lat: onBody.values.latitude_deg * DEG, height: Math.max(0, h), range: Math.max(3e4, Math.abs(h) * 3, 6e4), tilt: 35 * DEG, heading: 0 }, app.bodiesNow);
-      app.picked = { body: e.body, address: a.canonical };
-      app.pages.NAV?.choose(app.picked);
+      app.picked = { body: e.body, lon: onBody.values.longitude_deg * DEG, lat: onBody.values.latitude_deg * DEG, h, address: a.canonical };
+      choosePoint(app.picked);
+      if (app.observerFollows) app.setObserver(a.canonical);
     } else {
       // A point in space (or a body's centre): mark it and look at it from the nearest body.
       const icrs = a.answers.find((x) => x.frame === 'ICRS' && x.chart === 'cartesian');
@@ -295,13 +347,36 @@ async function goToAddress(text) {
           app.nav.flyToBody(best.key, { lon: g.lon, lat: g.lat, height: 0, range: r, tilt: 0, heading: 0 }, app.bodiesNow);
         }
       }
-      app.pages.NAV?.choose({ address: a.canonical });
+      app.picked = { address: a.canonical };
+      choosePoint(app.picked);
     }
     app.console.message('advisory', `To ${a.display}`, 'address');
   } catch (error) {
     app.console.message('caution', `Not an address the engine can resolve: ${error.message}`, 'address');
   }
 }
+
+// A point chosen: marked in rose on its body, answered by POINT, and the field's cube moved to it.
+function choosePoint(p) {
+  if (p.body && p.lat !== undefined && app.scene.bodies[p.body]) {
+    const fig = app.scene.bodies[p.body].fig;
+    app.scene.setFeature('chosen', p.body, [cartesian(fig, p.lon, p.lat, (p.h || 0) * app.scene.options.exaggeration + 2)], { kind: 'mark', colour: 0xee8fbd });
+  } else app.scene.setFeature('chosen', null, null);
+  app.pages.POINT?.choose(p);
+  app.pages.FIELD?.onPoint();
+  app.updateContext();
+}
+app.flyToPoint = () => {
+  const p = app.picked;
+  if (!p?.body || p.lat === undefined) { if (p?.address) goToAddress(p.address); return; }
+  const range = app.nav.focus === p.body ? Math.min(app.nav.controls.view.range, 2e5) : 2e5;
+  app.nav.flyToBody(p.body, { lon: p.lon, lat: p.lat, height: Math.max(0, p.h || 0), range, tilt: 35 * DEG, heading: 0 }, app.bodiesNow);
+};
+// The field's cube about the point chosen or the observer.
+app.openField = (which) => {
+  app.console.open('FIELD');
+  app.pages.FIELD.centreOn(which);
+};
 
 // ---- the pointer ----------------------------------------------------------------------------------------------
 function initPointer(canvas) {
@@ -323,9 +398,8 @@ function initPointer(canvas) {
     const h = g.h / app.scene.options.exaggeration;
     const address = `${key}(${latText(g.lat / DEG, 7)}, ${lonText(g.lon / DEG, 7)}, ${h.toFixed(1)} m)`;
     app.picked = { body: key, lon: g.lon, lat: g.lat, h, address };
-    app.scene.setFeature('chosen', key, [hit], { kind: 'mark', colour: 0xee8fbd });
-    app.console.show('left', 'NAV');
-    app.pages.NAV.choose(app.picked);
+    app.console.open('POINT');
+    choosePoint(app.picked);
     // The observer's instruments follow the point chosen, unless ENV's switch says otherwise.
     if (app.observerFollows) app.setObserver(address);
     else app.pages.ENV?.render(true);
@@ -377,10 +451,25 @@ function drawLabels(bodies, P, sats) {
       if (screen) extra.push({ name: sat.name.trim(), screen, satellite: sat, chosen });
     }
   }
+  // The point chosen and the observer, named beside their marks (first, so that nothing hides them).
+  const marks = [];
+  const at = (bodyKey, lonRad, latRad, h) => {
+    const bb = s.bodies[bodyKey], BB = bodies[bodyKey];
+    if (!bb || !BB) return null;
+    const x = cartesian(bb.fig, lonRad, latRad, h);
+    const camHere = applyTransposed(BB.rotation, [P[0] - BB.position[0], P[1] - BB.position[1], P[2] - BB.position[2]]);
+    if (globe.occluded(bb.fig, camHere, x, 50)) return null;
+    const w = apply(BB.rotation, x);
+    return project([w[0] + BB.position[0] - P[0], w[1] + BB.position[1] - P[1], w[2] + BB.position[2] - P[2]]);
+  };
+  const pk = app.picked, op = app.observerPlace;
+  const same = pk && (pk.canonical || pk.address) === app.observer;
+  if (pk?.body && pk.lat !== undefined) { const sc = at(pk.body, pk.lon, pk.lat, pk.h || 0); if (sc) marks.push({ name: same ? 'Point · observer' : 'Point', screen: sc, chosen: true, colour: '#FF9FCE' }); }
+  if (op && !same) { const sc = at(op.body, op.longitude_deg * DEG, op.latitude_deg * DEG, op.height_m || 0); if (sc) marks.push({ name: 'Observer', screen: sc, chosen: true, colour: '#CDB0EE' }); }
   const night = document.documentElement.dataset.theme !== 'day';
   app.labels.draw(['earth', 'moon'].includes(key) ? { body: key, fig: b.fig, rotation: B.rotation, rel, camBody, range: app.nav.controls.view.range, project } : null,
-    { size: 13, font: "'Source Serif 4', Georgia, serif", ink: night ? '#F7ECF6' : '#FFF8FD', halo: 'rgba(18, 8, 24, 0.8)', dot: '#EE8FBD',
-      satellite: '#F2D8EC', chosen: '#FF9FCE', body: '#E9D2F2' }, extra);
+    { size: 13, font: "'Source Sans 3', 'Segoe UI', system-ui, sans-serif", ink: night ? '#F7ECF6' : '#FFF8FD', halo: 'rgba(18, 8, 24, 0.8)', dot: '#EE8FBD',
+      satellite: '#F2D8EC', chosen: '#FF9FCE', body: '#E9D2F2' }, [...marks, ...extra]);
 }
 
 // ---- the frame loop -------------------------------------------------------------------------------------------
@@ -473,12 +562,50 @@ function status() {
   app.console.setLamp('tile', st?.loading ? 'advisory' : 'off', st?.loading ? `${st.loading} tiles coming` : '');
   app.console.setLamp('eph', app.world.window ? 'good' : 'caution', app.world.window ? 'The bodies placed by DE440' : 'No ephemeris window yet');
   app.console.setLamp('bus', app.bus.ok ? 'good' : 'caution', app.bus.ok ? 'Readings arrive' : `The bus is silent: ${app.bus.error || ''}`);
-  app.pages.NAV.update();
+  app.pages.POINT.update();
   app.pages.TIME.update();
+  app.updateContext();
   if (app.clock.running) refreshTime();
   updateImageryDate();
   writeHash();
 }
+
+// ---- the context --------------------------------------------------------------------------------------------
+// What is looked at, the point chosen, the observer, the frame, the instruments' mounts, and how the
+// point and the observer stand to each other: written only when it changes.
+const FIGURE_CHART = { earth: 'geodetic on WGS 84', moon: 'on the Moon\'s sphere' };
+const contextShown = {};
+function put(id, text) { if (contextShown[id] !== text) { contextShown[id] = text; const e = document.getElementById(id); if (e) e.textContent = text; } }
+const placeText = (body, latDeg, lonDeg) => `${app.scene?.bodies[body]?.name || body || ''} ${latText(latDeg, 3)}, ${lonText(lonDeg, 3)}`.trim();
+app.updateContext = () => {
+  if (!app.scene || !app.nav) return;
+  const v = app.nav.controls.view, key = app.nav.focus, name = app.scene.bodies[key]?.name || key;
+  put('ctx-view-value', app.nav.transfer ? `flying to ${app.scene.bodies[app.nav.transfer.key]?.name || ''}` : `${name} · ${length(v.range)} away`);
+  const p = app.picked;
+  let point = 'none: click the world';
+  if (p?.body && p.lat !== undefined) {
+    const near = nearestPlace(app.gazetteer, p.body, p.lat / DEG, p.lon / DEG);
+    point = `${near?.inside ? `${near.entry.name} · ` : ''}${placeText(p.body, p.lat / DEG, p.lon / DEG)}`;
+  } else if (p?.address) point = p.canonical || p.address;
+  put('ctx-point-value', point);
+  const o = app.observerPlace;
+  put('ctx-observer-value', `${o ? placeText(o.body, o.latitude_deg, o.longitude_deg) : app.observer || '—'}${app.observerFollows ? ' · follows the point' : ''}`);
+  const frame = app.world?.info.get(key)?.fixedFrame || '';
+  put('ctx-frame-value', `${frame}${FIGURE_CHART[key] ? ` · ${FIGURE_CHART[key]}` : frame ? ' · its IAU sphere' : ''}`);
+  const sensors = app.acquisitionState?.session?.sensors || [];
+  const on = sensors.filter((s) => s.mount === 'observer').length, feeds = sensors.filter((s) => s.external).length;
+  put('ctx-mounts-value', sensors.length ? `${on} on the observer · ${sensors.length - on - feeds} elsewhere · ${feeds} feeds` : '—');
+  let rel = '';
+  if (p && o) {
+    if ((p.canonical || p.address) === app.observer) rel = 'the observer stands at the point';
+    else if (p.body === o.body && p.lat !== undefined && app.scene.bodies[p.body]) {
+      const R = app.scene.bodies[p.body].fig.a, la = o.latitude_deg * DEG, lb = p.lat, dl = p.lon - o.longitude_deg * DEG;
+      const d = R * Math.acos(Math.min(1, Math.max(-1, Math.sin(la) * Math.sin(lb) + Math.cos(la) * Math.cos(lb) * Math.cos(dl))));
+      rel = `the point is ${length(d)} from the observer`;
+    } else if (p.body && o.body && p.body !== o.body) rel = `the point and the observer are on different bodies`;
+  }
+  put('ctx-relation-value', rel);
+};
 
 // The lamps the readings light.
 function readingsLamps() {
@@ -590,24 +717,37 @@ async function main() {
   if (Array.isArray(saved?.satellites)) app.satellites.groups = saved.satellites;
   app.bus = new BusClient();
 
-  // The displays and their pages.
-  app.console.display('left', [['NAV', 'Where the view is, and a point in every frame'], ['TIME', 'The instant in its scales'], ['FRAMES', 'The catalogue of frames and its loops'], ['LAYERS', 'What is drawn'], ['SYS', 'The engine, the data, the messages']]);
-  app.console.display('right', [['ENV', 'The environment of the observer'], ['BUS', 'Every stream of readings'], ['INSTR', 'The instruments'], ['SCHED', 'The acquisition\'s scheduling']]);
-  app.pages = { NAV: navPage(app), TIME: timePage(app), FRAMES: framesPage(app), LAYERS: layersPage(app), SYS: sysPage(app),
-    ENV: envPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app) };
-  for (const k of ['NAV', 'TIME', 'FRAMES', 'LAYERS', 'SYS']) app.console.register('left', k, app.pages[k]);
-  for (const k of ['ENV', 'BUS', 'INSTR', 'SCHED']) app.console.register('right', k, app.pages[k]);
+  // The displays and their pages, each of the science deck, the engineering deck, or both.
+  const LEFT = [['POINT', 'The point chosen: its place, from the observer, in every frame', 'science'], ['LAYERS', 'What is drawn', 'science'], ['TIME', 'The instant in its scales', 'both'],
+    ['FRAMES', 'The catalogue of frames and its loops', 'engineering'], ['SYS', 'The engine, the data, the messages', 'engineering']];
+  const RIGHT = [['ENV', 'The environment the observer\'s instruments read', 'science'], ['FIELD', 'The field about a point, as a cube filled with colour', 'science'], ['INSTR', 'The instruments, their readings first', 'both'],
+    ['BUS', 'Every stream of readings, with its envelope', 'engineering'], ['SCHED', 'The acquisition\'s scheduling', 'engineering']];
+  app.console.display('left', LEFT);
+  app.console.display('right', RIGHT);
+  app.pages = { POINT: pointPage(app), TIME: timePage(app), FRAMES: framesPage(app), LAYERS: layersPage(app), SYS: sysPage(app),
+    ENV: envPage(app), FIELD: fieldPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app) };
+  for (const [k] of LEFT) app.console.register('left', k, app.pages[k]);
+  for (const [k] of RIGHT) app.console.register('right', k, app.pages[k]);
   app.isShown = (k) => app.console.isShown(k);
   const shown = app.console.restore();
-  app.console.show('left', shown?.left || 'NAV');
-  app.console.show('right', shown?.right || 'ENV');
+  app.console.deck = shown?.deck === 'engineering' ? 'engineering' : 'science';
+  app.console.show('left', shown?.left && app.pages[shown.left] && LEFT.some(([k]) => k === shown.left) ? shown.left : 'POINT');
+  app.console.show('right', shown?.right && RIGHT.some(([k]) => k === shown.right) ? shown.right : 'ENV');
+  app.console.setDeck(app.console.deck);
+  for (const b of document.querySelectorAll('.glare [data-deck]')) b.addEventListener('click', () => app.console.setDeck(b.dataset.deck));
+  // The context: each part opens the page that studies it.
+  $('#ctx-view').addEventListener('click', () => app.console.open('POINT'));
+  $('#ctx-point').addEventListener('click', () => { app.console.open('POINT'); if (app.picked) app.flyToPoint(); });
+  $('#ctx-observer').addEventListener('click', () => app.console.open('ENV'));
+  $('#ctx-frame').addEventListener('click', () => app.console.open('FRAMES'));
+  $('#ctx-mounts').addEventListener('click', () => app.console.open('INSTR'));
   app.console.bodyKeys(bodies, (key) => {
     if (key === 'system') app.nav.flyToBody('sun', DEFAULT_VIEWS.sun, app.bodiesNow);
     else app.nav.flyToBody(key, null, app.bodiesNow);
   });
   app.console.timeKeys(app.clock);
   $('#compass').addEventListener('click', () => app.nav.controls.flyTo({ heading: 0, tilt: 0 }, 0.8));
-  $('#messages-all').addEventListener('click', () => app.console.show('left', 'SYS'));
+  $('#messages-all').addEventListener('click', () => app.console.open('SYS'));
   initAddress();
   initPointer($('#globe'));
   app.updateCredits();

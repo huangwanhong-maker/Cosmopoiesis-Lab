@@ -35,6 +35,11 @@
 //   {"op": "field_map", "body": "moon", "height_m"?: h, "step_deg"?: d, "quantity"?: "total" | "radial",
 //    "synthetic"?: bool, "synthetic_degree"?: n, "seed"?: n}
 //                                                     the Moon's crustal field on a grid (lunar.hpp), for drawing
+//   {"op": "probe_volume", "at": address | "observer", "time": text, "family": f, "edge_m": m, "n": 2…24,
+//    "quantities"?: [names], "settings"?: {...}, "encoding"?: "json" | "f32", "session"?: id, "threads"?: k}
+//                                                     a family read in the n³ cells of a cube about an event, in
+//                                                     the body's east, north and up (neighbourhood.hpp): a
+//                                                     session's world, or one told the session's inputs
 //   {"op": "acquire.configure" | "acquire.step" | "acquire.analyse" | "acquire.describe", "session": id, ...}
 //                                                     the acquisition runtime (acquisition.hpp): sensors, servers and
 //                                                     policy; one step of releases, scheduling and dispatch; a
@@ -66,6 +71,7 @@
 #include "environment.hpp"
 #include "lunar.hpp"
 #include "instruments.hpp"
+#include "neighbourhood.hpp"
 #include "satellites.hpp"
 #include "spacetime.hpp"
 
@@ -238,23 +244,8 @@ Json field_lines(World& w, const mt::Instant& t, double max_radius_re) {
                        {"caveat", "the core's field alone: true near the Earth, a sketch beyond some four Earth radii, where the magnetosphere's currents shape it"}});
 }
 
-// The Moon's crustal field on a grid of latitudes and longitudes (cell centres, rows from the north).
-// Base64 (RFC 4648 §4) of bytes: a grid's values as little-endian float32, a sixth of the text of
-// their decimal digits, for the pipe between the engine and its server.
-std::string base64(const unsigned char* data, std::size_t n) {
-  static const char* table = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-  std::string out;
-  out.reserve((n + 2) / 3 * 4);
-  for (std::size_t i = 0; i < n; i += 3) {
-    const unsigned v = unsigned(data[i]) << 16 | (i + 1 < n ? unsigned(data[i + 1]) << 8 : 0u) | (i + 2 < n ? unsigned(data[i + 2]) : 0u);
-    out += table[v >> 18 & 63];
-    out += table[v >> 12 & 63];
-    out += i + 1 < n ? table[v >> 6 & 63] : '=';
-    out += i + 2 < n ? table[v & 63] : '=';
-  }
-  return out;
-}
-
+// The Moon's crustal field on a grid of latitudes and longitudes (cell centres, rows from the north),
+// its values as numbers or as base64 of float32 (neighbourhood.hpp).
 Json field_map(World& w, const Json& r) {
   const auto f = lunar_field(w);
   if (!f) throw std::invalid_argument("the Moon's crustal model is not in the cache (python data/acquisition/fetch.py moon-magnetic-t2015)");
@@ -298,6 +289,35 @@ Json field_map(World& w, const Json& r) {
   return out;
 }
 
+// A world as an acquisition session holds it: the spacetime, the geoid, and the models of the
+// environment and of the Moon, from the world's sources.
+std::unique_ptr<World> session_world(Spacetime& s, const Json& sources) {
+  auto w = std::make_unique<World>(s);
+  w->geoid = geoid_grid(sources["geoid"].text());
+  attach_environment_models(*w, sources);
+  attach_lunar_model(*w, sources);
+  return w;
+}
+
+// The satellites' element sets, by group, read again when the files change (`key` is what was read).
+void load_elements(World& w, const Json& elements, std::string& key) {
+  std::string k;
+  for (std::size_t i = 0; i < elements.size(); i++) k += elements[i]["path"].text() + "|" + elements[i]["stamp"].text() + ";";
+  if (k == key) return;
+  w.elements.clear();
+  for (std::size_t i = 0; i < elements.size(); i++) {
+    const std::string path = elements[i]["path"].text(), group = elements[i]["group"].text();
+    try {
+      auto sets = navigation::orbits::read_tles(read_text(path));
+      auto& into = w.elements[group];
+      into.insert(into.end(), sets.begin(), sets.end());
+    } catch (const std::exception&) {
+      // A group whose file cannot be read is left out; its sensors say they have no elements.
+    }
+  }
+  key = k;
+}
+
 // The acquisition sessions of a serving engine, each with the world its instruments read.
 struct Held {
   std::unique_ptr<World> world;
@@ -311,36 +331,85 @@ Held& session_of(Spacetime& s, const Json& r) {
   auto it = sessions.find(id);
   if (it == sessions.end()) {
     Held h;
-    h.world = std::make_unique<World>(s);
-    h.world->geoid = geoid_grid(r["sources"]["geoid"].text());
-    attach_environment_models(*h.world, r["sources"]);
-    attach_lunar_model(*h.world, r["sources"]);
+    h.world = session_world(s, r["sources"]);
     const std::size_t hw = std::max(2u, std::thread::hardware_concurrency());
     const std::size_t workers = r["workers"].is_number() ? std::size_t(std::max(1.0, r["workers"].as_number())) : std::min<std::size_t>(4, hw - 1);
     h.session = std::make_unique<Session>(*h.world, registry(), workers);
     it = sessions.emplace(id, std::move(h)).first;
   }
   Held& h = it->second;
-  // The satellites' element sets, by group, read again when the files change.
-  if (r["elements"].is_array()) {
-    std::string key;
-    for (std::size_t i = 0; i < r["elements"].size(); i++) key += r["elements"][i]["path"].text() + "|" + r["elements"][i]["stamp"].text() + ";";
-    if (key != h.elements_key) {
-      h.world->elements.clear();
-      for (std::size_t i = 0; i < r["elements"].size(); i++) {
-        const std::string path = r["elements"][i]["path"].text(), group = r["elements"][i]["group"].text();
-        try {
-          auto sets = navigation::orbits::read_tles(read_text(path));
-          auto& into = h.world->elements[group];
-          into.insert(into.end(), sets.begin(), sets.end());
-        } catch (const std::exception&) {
-          // A group whose file cannot be read is left out; its sensors say they have no elements.
-        }
-      }
-      h.elements_key = key;
+  if (r["elements"].is_array()) load_elements(*h.world, r["elements"], h.elements_key);
+  return h;
+}
+
+// The world a cube reads when it names no session of this engine: built as a session's is, kept
+// between requests, and told by the request what the session's world was last told (the satellites'
+// element sets, the solar wind at L1, the present and the seed), so that a cube reads what the
+// session's sensors read without the session's engine pausing for it. Without those inputs it has
+// no elements, no solar wind, the present at J2000.0 and the default seed, as a new session has.
+World& probe_world(Spacetime& s, const Json& r) {
+  static std::unique_ptr<World> w;
+  static std::string key, elements_key;
+  static std::uint64_t seed0 = 0;
+  const Json& src = r["sources"];
+  std::string k = s.sources().ephemeris;
+  for (const char* name : {"moon_pck", "eop", "leap_seconds", "geoid", "wmm", "moon_magnetic"}) k += "|" + src[name].text();
+  if (!w || k != key || &w->spacetime() != &s) {
+    w = session_world(s, src);
+    key = k;
+    elements_key.clear();
+    seed0 = w->seed;
+  }
+  load_elements(*w, r["elements"].is_array() ? r["elements"] : Json::array(), elements_key);
+  w->solar_wind = r["inputs"]["solar_wind"].is_object() ? solar_wind_of(r["inputs"]["solar_wind"]) : SolarWindInputs{};
+  w->now_tt = r["now_tt_s"].is_number() ? r["now_tt_s"].as_number() : 0.0;
+  w->seed = r["seed"].is_number() ? std::uint64_t(r["seed"].as_number()) : seed0;
+  return *w;
+}
+
+// A cube about an event (neighbourhood.hpp): its centre an address, a satellite or the observer of the
+// session named; its instant the request's, or the address's own after "@".
+Json probe_volume_answer(Spacetime& s, const Json& r) {
+  namespace nf = navigation::frames;
+  const VolumeRequest q = VolumeRequest::from(r);
+  const World* w = nullptr;
+  std::string observer;
+  if (r["session"].is_string()) {
+    const auto it = sessions.find(r["session"].as_string());
+    if (it == sessions.end()) throw std::invalid_argument("probe_volume: no acquisition session " + r["session"].as_string() + " in this engine");
+    w = &it->second.session->world();
+    observer = it->second.session->observer();
+  } else {
+    w = &probe_world(s, r);
+  }
+  std::string text = r["at"].text();
+  if (text == "observer") {
+    if (observer.empty()) throw std::invalid_argument("probe_volume: the observer is an acquisition session's; name the session, or give an address");
+    text = observer;
+  }
+  if (text.empty()) throw std::invalid_argument("probe_volume: the centre's address is needed (\"at\")");
+  std::string canonical = text, own_instant;
+  if (text.rfind("satellite:", 0) != 0) {
+    try {
+      const nf::Address a = nf::parse_address(text);
+      canonical = nf::print_address(a);
+      own_instant = a.instant;
+    } catch (const nf::SyntaxError& e) {
+      throw std::invalid_argument(std::string("probe_volume: ") + e.what());
     }
   }
-  return h;
+  mt::Instant t;
+  if (!r["time"].text().empty()) t = instant_of(s, r["time"]);
+  else if (own_instant == "now") t = instant_of(s, Json("unix:" + std::to_string(r["now_unix"].as_number())));
+  else if (!own_instant.empty()) t = instant_of(s, Json(own_instant));
+  else throw std::invalid_argument("probe_volume: a time is needed (\"time\", or the address's own after @)");
+  MountState centre;
+  try {
+    centre = mount_state(*w, text, t);
+  } catch (const Unavailable& e) {
+    throw std::invalid_argument(std::string("probe_volume: ") + e.what());
+  }
+  return probe_volume(*w, registry(), q, centre, canonical, t);
 }
 
 Json event_json(const navigation::frames::Event& e) {
@@ -499,6 +568,7 @@ Json answer(const Json& r) {
     World& w = field_world(s, r["sources"]);
     return field_map(w, r);
   }
+  if (op == "probe_volume") return probe_volume_answer(s, r);
   if (op == "acquire.configure") return session_of(s, r).session->configure(r);
   if (op == "acquire.describe") return session_of(s, r).session->describe();
   if (op == "acquire.step") return session_of(s, r).session->step(r);

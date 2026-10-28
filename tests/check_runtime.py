@@ -189,6 +189,25 @@ try:
     check("magnetometer: on the Moon WMM has no field: no reading, with the reason",
           r.get("available") is False and bool(r.get("reason")), r.get("reason"))
 
+    # ---- a cube of the session's world (probe_volume) -----------------------------------------------------
+    # With n odd, the centre cell of a cube about a sensor's mount, at the sensor's tick, read in the session's
+    # world, is exactly the sensor's reading (the engine's neighbourhood.hpp; its other checks, against the
+    # domains' references and the field equations, are in run-tests.mjs). TT 846 460 800 s is JD 2461342.0 TT.
+    def cube(session: str, **r) -> dict:
+        return eng.ask({"op": "probe_volume", "session": session, "time": "JD 2461342.0 TT", "edge_m": 1000, "n": 5, **r}, timeout=120)
+
+    def centre_agrees(answer: dict, reading: dict, names: tuple) -> tuple[bool, object]:
+        got = {q["name"]: q["values"][62] for q in answer.get("quantities", [])}  # cell (2, 2, 2) of 5³
+        want = reading.get("values", {})
+        return all(n in got and got[n] == want.get(n) for n in names), {n: (got.get(n), want.get(n)) for n in names}
+
+    for sid, family, names in (("mag", "magnetometer.wmm2025", ("north_T", "east_T", "down_T", "total_T", "declination_deg")),
+                               ("air", "atmosphere.ussa1976", ("temperature_K", "pressure_Pa", "density_kg_m3", "height_msl_m"))):
+        ok, detail = centre_agrees(cube("check", at="observer", family=family), readings.get(sid, {}), names)
+        check(f"probe volume: the centre cell of a cube of {family} about the observer is the session's own sensor, exactly", ok, detail)
+    absent = cube("nowhere", at="observer", family="magnetometer.wmm2025")
+    check("probe volume: a cube of a session the engine does not hold is refused, and says so", "no acquisition session" in absent.get("error", ""), absent.get("error"))
+
     if gnss:
         v = readings["gnss"].get("values", {})
         check("gnss: some GPS and Galileo satellites above 10°", v.get("in_view", {}).get("gps-ops", 0) >= 4)
@@ -298,6 +317,13 @@ try:
     check("lunar magnetometer: 2 km below the sphere (low ground) it reads the model at the sphere, and says so",
           abs(low.get("crustal_T", 0) - math.sqrt(sum(x * x for x in rg[3:]))) < 1e-15 and abs(low.get("below_sphere_m", 0) - 2000) < 1e-3 and bool(low.get("note")),
           {k: low.get(k) for k in ("crustal_T", "below_sphere_m")})
+    g = fixtures["gerasimovich"]
+    ok, detail = centre_agrees(cube("fields", at=f"moon({abs(g[0])} S, {abs(g[1])} W, {g[2]:.0f} m)", family="magnetometer.moon"),
+                               got.get("moon.gerasimovich", {}), ("north_T", "east_T", "down_T", "total_T", "crustal_T"))
+    check("probe volume: the centre of a lunar cube over Gerasimovich is the session's own magnetometer there, exactly", ok, detail)
+    ok, detail = centre_agrees(cube("fields", at="moon(7.5 N, 59 W)", family="magnetometer.moon", settings={"synthetic": True}),
+                               got.get("moon.fine", {}), ("north_T", "east_T", "down_T", "small_scales_T"))
+    check("probe volume: and with the synthetic small scales, the session's world's own (its seed's), exactly", ok, detail)
     fine = got.get("moon.fine", {}).get("values", {})
     check("lunar magnetometer: with finer scales, the power below the spectral law to degree 720, said to be synthetic",
           fine.get("small_scales_degree") == 720 and fine.get("small_scales_T", 0) > 0 and fine.get("provenance_of_parts", {}).get("small_scales") == "synthetic",

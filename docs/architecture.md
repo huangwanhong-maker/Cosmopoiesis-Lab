@@ -183,6 +183,7 @@ One JSON request on the standard input, one JSON answer on the standard output, 
 | `{"op": "status" \| "time" \| "frames" \| "ephemeris" \| "bodies" \| "transform" \| "holonomy" \| "convert" \| "address" \| "geodesic" \| "satellites", …}` | the spacetime of slice S: the world's sources, an instant in every scale, the catalogue of frames, sampled motions of the bodies, transformations, loops' holonomies, a point in every coordinate system, addresses read and answered in every frame and chart, geodesics, satellites (the README, §5) |
 | `{"op": "instruments" \| "acquire.configure" \| "acquire.step" \| "acquire.describe" \| "acquire.analyse", …}` | the kernels, their classes, the families and the encyclopedia's declared families; an acquisition session configured, stepped, described and simulated, with the kernel's report (decisions 0004, 0005) |
 | `{"op": "field_lines" \| "field_map", …}` | the Earth's field lines of WMM2025; the Moon's crustal field on a grid, with its finer scales when asked (decision 0005) |
+| `{"op": "probe_volume", "at", "family", "edge_m", "n", …}` | an instrument whose reading depends on its place, read over a cube about an event in the live session's world, its axes east, north and up at its centre: each quantity per cell, the vector in the cube's axes, the reasons where it cannot read (decision 0006) |
 
 With `--serve` the engine reads a request per line and keeps what it has read between them; the server keeps it so for the spacetime's operations, and will still run `run` as a job of its own process.
 
@@ -261,7 +262,16 @@ The page draws with the visualization layer and adds nothing general of its own:
 
 ### 7.3 Style
 
-A console laid out as a flight deck (decision [0003](../development/decisions/0003-one-world-its-addresses-and-a-console.md)): a glareshield of clocks and annunciator lamps, multifunction displays with pages chosen by keys, a control and display unit, a status line; no pop-ups, messages to a log and a lamp. Serif type (Source Serif 4), day and night. Its colours are **pink and purple**, the user's: rose (#EE8FBD) and orchid (#B892DD) on a plum night, a deeper rose (#C2477F) and orchid (#7D54AB) on lilac paper by day; its data in colours validated for colour vision deficiencies, the provenance of readings in three hues with glyphs, the status colours reserved.
+A console laid out as a flight deck (decision [0003](../development/decisions/0003-one-world-its-addresses-and-a-console.md)): a glareshield of clocks and annunciator lamps, multifunction displays with pages chosen by keys, a control and display unit, a status line; no pop-ups, messages to a log and a lamp. Since decision [0006](../development/decisions/0006-the-world-first-and-the-field-about-a-point.md):
+- **The context bar** beneath the clocks keeps apart:
+  - the view;
+  - the point chosen (rose);
+  - the observer (orchid);
+  - the frame;
+  - the instruments' mounts.
+- **Two decks.** The science deck holds the point, the environment, the field about a point and the instruments' readings. The engineering deck holds the frames, the bus, the scheduling and the engine.
+- **Type.** One family of three: Source Serif 4 for the name and prose, Source Sans 3 with tabular figures for everything read at a glance, and Source Code Pro for addresses and identifiers. Readings are 22–26 px, and nothing is under 12 px.
+- **Themes.** Day and night. Its colours are **pink and purple**, the user's: rose (#EE8FBD) and orchid (#B892DD) on a plum night, a deeper rose (#C2477F) and orchid (#7D54AB) on lilac paper by day; its data in colours validated for colour vision deficiencies, the provenance of readings in three hues with glyphs, the status colours reserved.
 
 ### 7.4 The Server
 

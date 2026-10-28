@@ -11,8 +11,17 @@ README, §5:
     GET  /api/engine                         whether the engine is built and current, and which sources are in the cache
     POST /api/engine                         a request to the engine: {"op": "status" | "time" | "frames" | "ephemeris"
                                              | "bodies" | "transform" | "holonomy" | "convert" | "address" | "geodesic"
-                                             | "satellites" | "instruments", ...}; the server adds the world's sources
-                                             (and for "satellites" turns "groups" into the files of their element sets)
+                                             | "satellites" | "instruments" | "field_lines" | "field_map" | "probe_volume", ...};
+                                             the server adds the world's sources (and for "satellites" turns "groups"
+                                             into the files of their element sets)
+    POST /api/engine {"op": "probe_volume", "at": address | "observer", "time"?: text, "family", "edge_m", "n",
+                      "quantities"?, "settings"?, "encoding"?: "json" | "f32"}
+                                             a family read in the n³ cells of a cube about an event (the engine's
+                                             neighbourhood.hpp); the server puts the observer's address for "observer"
+                                             and the mission clock's instant where no time is given, and adds what the
+                                             acquisition session's world was last told (the satellites' element sets,
+                                             the solar wind, the present, the seed), so that the cube reads the world the
+                                             session's sensors read, in the page's engine, without pausing the session's
     GET  /api/clock                          the mission clock: TT at a wall instant, its rate, running or not
     POST /api/clock                          {"action": "set" | "rate" | "play" | "pause" | "present", "time"?: text, "tt_s"?, "rate"?}
     GET  /api/bus?since=n&wait=s             the readings delivered since sequence n (waiting up to s seconds for one)
@@ -46,6 +55,7 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import os
 import re
 import sys
 import threading
@@ -88,9 +98,12 @@ TERRAIN = TerrainService(CACHE)
 CLOCK = runtime.MissionClock()
 RECIPE = None
 WRITES = {"allowed": True, "token": None}
-LIMITS = {"bytes": 256 * 1024, "samples": 4000, "positions": 10000, "seconds": 60.0, "max_level": {"earth": 18, "moon": 14}}
+LIMITS = {"bytes": 256 * 1024, "samples": 4000, "positions": 10000, "seconds": 60.0, "max_level": {"earth": 18, "moon": 14},
+          "probe": {"n": [2, 24], "edge_m": [1.0, 2e7], "threads": min(8, os.cpu_count() or 4)}}
 OPS = {"status", "time", "frames", "ephemeris", "bodies", "transform", "holonomy", "convert", "address", "geodesic", "satellites", "instruments",
-       "field_lines", "field_map"}
+       "field_lines", "field_map", "probe_volume"}
+# The engine's instrument families, read from it once, for the declared costs that bound a cube.
+FAMILIES: dict[str, dict] = {}
 SATELLITES = CACHE / "celestrak-gp"
 # The Moon's field maps, which take the engine seconds and do not change: the last few kept.
 FIELD_MAPS: dict[str, dict] = {}
@@ -118,11 +131,53 @@ def write_refusal(handler) -> str | None:
     return None
 
 
+def families() -> dict[str, dict]:
+    if not FAMILIES:
+        answer = ENGINE.ask({"op": "instruments"}, timeout=LIMITS["seconds"])
+        FAMILIES.update({f["family"]: f for f in answer.get("families", [])})
+    return FAMILIES
+
+
+def probe_refusal(body: dict) -> str | None:
+    """Why a cube is refused, or None: its centre, family, cells, edge and encoding, and its cost here, the cells
+    times the family's declared cost over this server's threads, against the seconds a request may take."""
+    limits = LIMITS["probe"]
+    if not isinstance(body.get("at"), str) or not body["at"].strip() or len(body["at"]) > 2000:
+        return 'probe_volume: "at" is the centre\'s address, or "observer"; at most 2000 characters'
+    if not isinstance(body.get("family"), str) or not body["family"]:
+        return 'probe_volume: name the instrument family, as "magnetometer.wmm2025"'
+    n, edge = body.get("n"), body.get("edge_m")
+    if isinstance(n, float) and n.is_integer():
+        n = body["n"] = int(n)
+    if not isinstance(n, int) or isinstance(n, bool) or not limits["n"][0] <= n <= limits["n"][1]:
+        return f"probe_volume: n, the cells along an edge, is a whole number from {limits['n'][0]} to {limits['n'][1]}"
+    if not isinstance(edge, (int, float)) or isinstance(edge, bool) or not limits["edge_m"][0] <= edge <= limits["edge_m"][1]:
+        return "probe_volume: edge_m, the cube's edge, is from 1 m to 20 000 km"
+    q = body.get("quantities")
+    if q is not None and (not isinstance(q, list) or len(q) > 64 or not all(isinstance(x, str) for x in q)):
+        return "probe_volume: quantities are a list of names, at most 64"
+    if body.get("settings") is not None and not isinstance(body["settings"], dict):
+        return "probe_volume: settings are the family's, an object"
+    if body.get("encoding", "json") not in ("json", "f32"):
+        return "probe_volume: the encoding is json or f32"
+    if body.get("time") is not None and not isinstance(body["time"], str):
+        return "probe_volume: a time is text, as 2026-10-28T12:00:00Z; without one, the mission clock's instant"
+    family = families().get(body["family"])
+    if family:  # an unknown or declared family is refused by the engine, which says why
+        seconds = n ** 3 * float(family.get("cost_s", 0.0)) / limits["threads"]
+        if seconds > LIMITS["seconds"]:
+            return (f"probe_volume: {n}³ cells of {body['family']} at its declared {float(family['cost_s']):g} s a reading, over "
+                    f"{limits['threads']} threads, take some {seconds:.0f} s, beyond this server's {LIMITS['seconds']:g} s: ask for fewer cells")
+    return None
+
+
 def engine_refusal(body: dict) -> str | None:
     """Why a request to the engine is refused, or None."""
     op = body.get("op")
     if op not in OPS:
         return f"unknown op {op!r}: one of {', '.join(sorted(OPS))}"
+    if op == "probe_volume":
+        return probe_refusal(body)
     if op == "address" and (not isinstance(body.get("text"), str) or len(body["text"]) > 2000):
         return "address: the text of an address, at most 2000 characters"
     if op in ("ephemeris", "bodies"):
@@ -243,6 +298,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body["files"] = [{"path": str(SATELLITES / g / "gp.tle"), "group": g} for g in body.pop("groups")]
             if body["op"] == "address":
                 body["now_unix"] = time.time()
+            if body["op"] == "probe_volume":
+                for key in ("session", "elements", "inputs", "now_tt_s", "now_unix", "seed", "threads"):
+                    body.pop(key, None)  # the server's to give
+                world = ACQUISITION.world_inputs()
+                if body["at"].strip() == "observer":
+                    body["at"] = world["observer"]
+                if not body.get("time") and "@" not in body["at"]:
+                    body["time"] = f"JD {2451545.0 + CLOCK.now() / 86400.0:.10f} TT"
+                body.update(elements=world["elements"], inputs=world["inputs"], now_tt_s=world["now_tt_s"], now_unix=time.time(),
+                            threads=LIMITS["probe"]["threads"])
+                if world["seed"] is not None:
+                    body["seed"] = world["seed"]
             if body["op"] == "field_map":
                 key = json.dumps(body, sort_keys=True)
                 if key not in FIELD_MAPS:
@@ -379,6 +446,7 @@ def main(argv: list[str]) -> int:
     if public:
         WRITES.update(allowed=bool(args.token), token=args.token)
         LIMITS.update(bytes=64 * 1024, samples=1500, positions=1000, seconds=20.0)
+        LIMITS["probe"]["threads"] = min(2, LIMITS["probe"]["threads"])
     if not engine.status()["current"]:
         print("The engine is not built from the present sources. Build it from the page, or run:\n"
               "  python data/acquisition/recipe.py applications/cosmopoiesis-lab/recipe.json", file=sys.stderr)

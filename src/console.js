@@ -1,10 +1,17 @@
-// The console: the glareshield (clocks and annunciators), two multi-function displays with their
-// pages, the CDU (the bodies, the spacetime address, the world clock, the messages), the status line.
+// The console: the glareshield (clocks, annunciators, the deck), the context (what is looked at, from
+// where, at which point, in which frame, read by what), two multi-function displays with their pages,
+// the CDU (the bodies, the spacetime address, the world clock, the messages), the status line.
 //
 // Nothing pops up. A change of state is a message in the log, with its level (advisory, caution,
 // warning) and its source, and lights an annunciator while it lasts; a warning's lamp flashes until it
 // is seen (a click). A page is a module with mount(el), and optionally show() and hide(); it is
 // registered on a display by its key, and the key's indicator lights while it is shown.
+//
+// Two decks share the displays (decision 0006). The science deck puts the world first: the point
+// chosen, its environment, the field about it, the instruments' readings. The engineering deck shows
+// the machinery: the catalogue of frames, the bus, the scheduling, the engine. A page belongs to one
+// deck or to both; the keys of the other deck's pages are put away, and a page of the other deck
+// asked for by name (a click on the context) is shown all the same, its key lit.
 
 import { esc, fmt, mjdOfTt, rateText, utcIso, duration } from './format.js';
 import { RATES } from './clock.js';
@@ -17,6 +24,9 @@ export class Console {
     this.app = app;
     this.pages = { left: new Map(), right: new Map() };
     this.shown = { left: null, right: null };
+    this.keys = { left: [], right: [] };
+    this.deck = 'science';
+    this.lastByDeck = { science: {}, engineering: {} };
     this.lamps = new Map();
     this.log = [];
     this.clockCells = {};
@@ -24,9 +34,12 @@ export class Console {
   }
 
   // ---- the displays ----------------------------------------------------------------------------------
+  // keys: [[key, title, deck]], deck 'science', 'engineering' or 'both'.
   display(side, keys) {
     const root = $(`#mfd-${side}`);
-    root.innerHTML = `<nav class="keys" role="tablist">${keys.map(([k, t]) => `<button type="button" class="key small" role="tab" data-page="${k}" title="${esc(t)}">${esc(k)}</button>`).join('')}
+    this.keys[side] = keys;
+    const key = ([k, t, d], i) => `${d === 'engineering' && i > 0 && keys[i - 1][2] !== 'engineering' ? '<span class="sep" aria-hidden="true"></span>' : ''}<button type="button" class="key small code" role="tab" data-page="${k}" data-deck="${d || 'both'}" title="${esc(t)}">${esc(k)}</button>`;
+    root.innerHTML = `<nav class="keys" role="tablist">${keys.map(key).join('')}
       <button type="button" class="key small icon fold" data-fold title="Fold the display" aria-label="Fold the display">${side === 'left' ? '‹' : '›'}</button></nav><div class="screen"></div>`;
     root.querySelector('.keys').addEventListener('click', (e) => {
       const b = e.target.closest('[data-page]');
@@ -50,18 +63,46 @@ export class Console {
     if (!p) return;
     p.el.classList.add('on');
     this.shown[side] = key;
+    $(`#mfd-${side}`).classList.remove('closed');
     for (const b of document.querySelectorAll(`#mfd-${side} [data-page]`)) b.classList.toggle('on', b.dataset.page === key);
+    const deck = this.keys[side].find((k) => k[0] === key)?.[2] || 'both';
+    if (deck === this.deck || deck === 'both') this.lastByDeck[this.deck][side] = key;
     p.page.show?.();
     this.save();
   }
   isShown(key) { return this.shown.left === key || this.shown.right === key; }
+  // Show a page wherever it is registered; the side it is on.
+  open(key) {
+    for (const side of ['left', 'right']) if (this.pages[side].has(key)) { this.show(side, key); return side; }
+    return null;
+  }
+  // The deck: each display goes to the page it last showed in that deck, or to the deck's first.
+  setDeck(deck) {
+    this.deck = deck;
+    document.documentElement.dataset.deck = deck;
+    for (const b of document.querySelectorAll('.glare [data-deck]')) b.classList.toggle('on', b.dataset.deck === deck);
+    for (const side of ['left', 'right']) {
+      const keys = this.keys[side];
+      if (!keys.length) continue;
+      const fits = (k) => { const e = keys.find((x) => x[0] === k); return !!e && (e[2] === deck || e[2] === 'both'); };
+      const remembered = this.lastByDeck[deck][side];
+      const next = fits(remembered) ? remembered : fits(this.shown[side]) ? this.shown[side] : keys.find((x) => x[2] === deck || x[2] === 'both')?.[0];
+      if (next && next !== this.shown[side]) this.show(side, next);
+    }
+    this.save();
+  }
+  // A display made wider for a page that needs room (the field's cube), or back.
+  widen(side, on) {
+    document.documentElement.style.setProperty(side === 'left' ? '--mfd-w' : '--mfd-right-w', on ? 'min(540px, 40vw)' : '');
+  }
   restore() {
     let s = null;
     try { s = JSON.parse(localStorage.getItem(STORE) || 'null'); } catch { /* none */ }
+    if (s?.lastByDeck) this.lastByDeck = { science: { ...s.lastByDeck.science }, engineering: { ...s.lastByDeck.engineering } };
     return s;
   }
   save() {
-    try { localStorage.setItem(STORE, JSON.stringify({ left: this.shown.left, right: this.shown.right })); } catch { /* none */ }
+    try { localStorage.setItem(STORE, JSON.stringify({ left: this.shown.left, right: this.shown.right, deck: this.deck, lastByDeck: this.lastByDeck })); } catch { /* none */ }
   }
 
   // ---- annunciators and messages ---------------------------------------------------------------------
@@ -99,7 +140,7 @@ export class Console {
   }
   drawMessages() {
     const list = $('#messages');
-    list.innerHTML = this.log.slice(-4).reverse().map((m) => `<li class="${m.level}"><span class="t">${m.at.toISOString().slice(11, 19)}</span><span>${m.level === 'warning' ? 'WARNING ' : m.level === 'caution' ? 'CAUTION ' : ''}${esc(m.text)}${m.count > 1 ? ` (×${m.count})` : ''}</span></li>`).join('');
+    list.innerHTML = this.log.slice(-4).reverse().map((m) => `<li class="${m.level}"><span class="t">${m.at.toISOString().slice(11, 19)}</span><span>${m.level === 'warning' ? 'Warning: ' : m.level === 'caution' ? 'Caution: ' : ''}${esc(m.text)}${m.count > 1 ? ` (×${m.count})` : ''}</span></li>`).join('');
   }
 
   // ---- the clocks -------------------------------------------------------------------------------------

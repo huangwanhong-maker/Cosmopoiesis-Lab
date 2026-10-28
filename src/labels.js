@@ -50,7 +50,7 @@ export class Labels {
     // The bodies' names, upright, and the satellites', italic, beside their points (which the scene
     // draws), the chosen one first.
     for (const e of extra) {
-      ctx.font = e.body ? `${style.size}px ${style.font}` : `italic ${style.size - 1}px ${style.font}`;
+      ctx.font = e.colour ? `600 ${style.size}px ${style.font}` : e.body ? `${style.size}px ${style.font}` : `italic ${style.size - 1}px ${style.font}`;
       const [x, y] = e.screen;
       const tw = ctx.measureText(e.name).width;
       const box = [x - 6, y - style.size / 2 - 3, x + 9 + tw + 4, y + style.size / 2 + 3];
@@ -59,7 +59,7 @@ export class Labels {
       ctx.lineWidth = 3;
       ctx.strokeStyle = style.halo;
       ctx.strokeText(e.name, x + 8, y);
-      ctx.fillStyle = e.body ? style.body || style.ink : e.chosen ? style.chosen : style.satellite;
+      ctx.fillStyle = e.colour || (e.body ? style.body || style.ink : e.chosen ? style.chosen : style.satellite);
       ctx.fillText(e.name, x + 8, y);
       this.hits.push({ box, satellite: e.satellite, body: e.body });
     }

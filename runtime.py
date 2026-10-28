@@ -628,6 +628,18 @@ class Acquisition:
         if "latitude_deg" in v:
             self.observer_place = {"latitude_deg": v["latitude_deg"], "longitude_deg": v["longitude_deg"], "height_m": v.get("height_m", 0), "body": body}
 
+    def world_inputs(self) -> dict:
+        """What the session's world holds beside the sources the server names: the satellites' element sets, the
+        solar wind as the session was last told it, the present (TT seconds from J2000.0), the seed and the observer.
+        A computation in another engine process that must read the same world (the page's cubes, probe_volume)
+        is given these, so that the session's engine never pauses for it."""
+        with self.lock:
+            inputs = {"solar_wind": {**self.inputs.get("imf", {}), **self.inputs.get("speed", {})}} if self.inputs else {}
+            observer = self.observer
+        seed = (self.configured or {}).get("seed")
+        return {"elements": self.elements(), "inputs": inputs, "now_tt_s": tt_of_unix(time.time()),
+                "seed": seed, "observer": observer}
+
     def request_now(self, ids: list[str]) -> None:
         with self.lock:
             self.now_requests += ids
