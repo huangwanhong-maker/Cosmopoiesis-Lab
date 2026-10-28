@@ -12,7 +12,8 @@ Decisions that concern only this work. Decisions that shape The Science Infrastr
 | [0001](0001-the-founding-of-cosmopoiesis.md) | The founding of Cosmopoiesis: a work of the infrastructure, its formalism and its architecture | Accepted, provisionally |
 | [0002](0002-the-spacetime-slice-first.md) | The spacetime slice first: the Earth and the Moon, their coordinates, and a globe | Accepted, provisionally; §2.3 amended by 0003 |
 | [0003](0003-one-world-its-addresses-and-a-console.md) | One world, its addresses, and a console | Accepted, provisionally |
-| [0004](0004-instruments-and-their-acquisition.md) | Instruments and their acquisition: kernels of observation, a mission clock, and a runtime with deadlines | Accepted, provisionally |
+| [0004](0004-instruments-and-their-acquisition.md) | Instruments and their acquisition: kernels of observation, a mission clock, and a runtime with deadlines | Accepted, provisionally; §2.1 amended by 0005 |
+| [0005](0005-fields-known-in-part-and-declared-instruments.md) | Fields known in part, a compass with its coverage, declared instruments, and the kernel asked | Accepted, provisionally |
 
 ## 2. Template
 

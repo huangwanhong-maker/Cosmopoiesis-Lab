@@ -24,6 +24,9 @@ export function schedPage(app) {
         <h3>The policy</h3>
         <div class="row" id="sc-policies">${POLICIES.map(([o, aging, label], i) => `<button type="button" class="key small" data-policy="${i}">${label}</button>`).join('')}</div>
         <div id="sc-stats"></div>
+        <h3>The operating system's scheduler</h3>
+        <div id="sc-kernel"></div>
+        <div class="row"><button type="button" class="key small" data-kernel="probe">Time-sharing</button><button type="button" class="key small" data-kernel="fifo">Ask for SCHED_FIFO</button></div>
         <h3>The jobs as they ran <span class="aside">the last five seconds</span></h3>
         <div id="sc-timeline"></div>
         <div class="legend"><span><span class="crit c0"></span>display</span><span><span class="crit c1"></span>science</span><span><span class="crit c2"></span>mission</span><span><span class="crit c3"></span>safety</span><span><span class="status critical"></span>outlined: late</span></div>
@@ -35,6 +38,12 @@ export function schedPage(app) {
         <p><button type="button" class="key small" id="sc-analyse">Simulate each policy</button></p>
         <div id="sc-analysis"></div>`;
       el.addEventListener('click', async (e) => {
+        const k = e.target.closest('[data-kernel]');
+        if (k) {
+          acquire({ policy: { kernel: k.dataset.kernel } }).then((a) => { app.adoptAcquisition(a); page.refresh?.(); },
+            (error) => app.console.message('caution', `The kernel's class was not changed: ${error.message}`, 'scheduler'));
+          return;
+        }
         const p = e.target.closest('[data-policy]');
         if (p) {
           const [order, aging] = POLICIES[Number(p.dataset.policy)];
@@ -67,6 +76,13 @@ export function schedPage(app) {
           <tr><th>Late, in all</th><td class="num">${fmt(st.late_total ?? 0, 0)}</td></tr>
           <tr><th>Degraded</th><td>${ad.degraded ? Object.entries(ad.decimation || {}).map(([k, d]) => `${esc(k)} ×${d}`).join(', ') : 'no: every sensor at its period'}</td></tr>
           ${describe.error ? `<tr><th>Stalled</th><td class="error">${esc(describe.error)}</td></tr>` : ''}</tbody></table>`;
+        const k = describe.session?.kernel;
+        for (const b of el.querySelectorAll('[data-kernel]')) b.classList.toggle('on', (pol.kernel || 'probe') === b.dataset.kernel);
+        el.querySelector('#sc-kernel').innerHTML = k ? `<table><tbody>
+          <tr><th>The kernel</th><td>${esc(k.system)} ${esc(k.release)}<small>${k.wsl ? 'in WSL 2, under Windows\'s own scheduler' : ''}${k.preempt_rt ? 'PREEMPT_RT: fully preemptible' : ' not PREEMPT_RT'}</small></td></tr>
+          <tr><th>Real-time classes</th><td>SCHED_FIFO <span class="status ${k.fifo_permitted ? 'good' : 'muted'}">${k.fifo_permitted ? 'granted' : 'refused'}</span>, SCHED_DEADLINE <span class="status ${k.deadline_permitted ? 'good' : 'muted'}">${k.deadline_permitted ? 'granted' : 'refused'}</span><small>RLIMIT_RTPRIO ${fmt(k.rtprio_limit, 0)}${k.refusal ? `; ${esc(k.refusal)}` : ''}</small></td></tr>
+          <tr><th>The workers run</th><td>${esc(k.workers_class)}${k.raised ? ' <span class="status good">raised</span>' : ''}<small>${esc(k.about)}</small></td></tr></tbody></table>
+          <p class="note">The policy above orders the jobs among the engine's workers; the kernel decides whether other processes may take the workers' processors. EDF in user space is exact in logical time and best effort in the wall's: only a real-time class on a preemptible kernel bounds the latency.</p>` : '';
         el.querySelector('#sc-servers').innerHTML = `<table><tbody>${(describe.session?.servers || []).map((s) => `<tr><th>${esc(s.name)}</th><td class="num">${fmt(s.budget_s, 3)} s every ${fmt(s.period_s, 2)} s<small>bandwidth ${fmt(s.bandwidth * 100, 1)}%</small></td></tr>`).join('')}</tbody></table>
           <p class="note">A server's jobs take its deadlines: a job that would take more than the budget is pushed to the next period rather than taking more than its share (Abeni and Buttazzo 1998).</p>`;
         const now = Date.now() / 1000 + app.clock.offset;

@@ -12,11 +12,12 @@
 
 import * as THREE from 'three';
 import { globe } from '../../../visualization/js/index.js';
-import { acquisition, engine, engineState, places, terrainState } from './api.js';
+import { acquire, acquisition, engine, engineState, places, terrainState } from './api.js';
 import { BusClient } from './busclient.js';
 import { MissionClock } from './clock.js';
 import { Console } from './console.js';
 import { DEG, esc, fmt, latText, length, lonText, ttFromJd, ttText } from './format.js';
+import { FieldLayers } from './fields.js';
 import { Labels } from './labels.js';
 import { loadMaps } from './maps.js';
 import { DEFAULT_VIEWS, Navigator } from './navigator.js';
@@ -34,7 +35,7 @@ import { busPage } from './pages/bus.js';
 import { instrPage } from './pages/instr.js';
 import { schedPage } from './pages/sched.js';
 
-const { cartesian, geodetic, IMAGERY, loadStarProduct, applyTransposed } = globe;
+const { cartesian, geodetic, IMAGERY, loadStarProduct, apply, applyTransposed, localFrame } = globe;
 const $ = (s) => document.querySelector(s);
 const STORE = 'cosmopoiesis-world';
 
@@ -129,6 +130,8 @@ app.updateCredits = () => {
   if (focus === 'earth') list.push('Heights: ETOPO 2022 (NOAA NCEI); Mapzen Terrarium on AWS; EGM96 (NGA, via GeographicLib); land: Natural Earth');
   if (focus === 'moon') list.push('Heights: LOLA (NASA GSFC, PDS); names: IAU WGPSN (USGS)');
   if (o.synthetic) list.push('Detail below the data\'s resolution is synthetic (violet in the provenance layer)');
+  if (focus === 'moon' && o.moonField && app.fields?.map) list.push(`${app.fields.map.title}: ${app.fields.map.credit}`);
+  if (focus === 'earth' && o.fieldLines) list.push('Field lines: WMM2025 (NOAA NCEI, BGS), the core\'s field traced by the engine');
   list.push('Ephemeris: JPL DE440s; the Moon: DE440 (NAIF); the Earth: IERS; stars: HYG v4.1 (CC BY-SA 4.0); Milky Way: Solar System Scope (CC BY 4.0)');
   list.push('Space weather: NOAA SWPC; earthquakes: USGS; geomagnetism: WMM2025 (NOAA NCEI, BGS); satellites: CelesTrak');
   $('#credits').textContent = list[0] + (list.length > 1 ? ` · and ${list.length - 1} more (SYS)` : '');
@@ -136,6 +139,25 @@ app.updateCredits = () => {
 };
 
 // ---- the observer --------------------------------------------------------------------------------------------
+// Whether a point chosen on a body moves the observer (and so its instruments) there: a per-viewer
+// preference, on unless turned off in ENV.
+const FOLLOW_KEY = 'cosmopoiesis-observer-follows';
+app.observerFollows = (() => { try { return localStorage.getItem(FOLLOW_KEY) !== '0'; } catch { return true; } })();
+app.setObserverFollows = (on) => {
+  app.observerFollows = on;
+  try { localStorage.setItem(FOLLOW_KEY, on ? '1' : '0'); } catch { /* no storage */ }
+};
+// Move the observer: the session's instruments mounted on it read there from the next step.
+app.setObserver = async (text) => {
+  if (!text) return;
+  try {
+    app.adoptAcquisition(await acquire({ observer: text }));
+    app.console.message('advisory', `The observer is now at ${text}`, 'nav');
+  } catch (error) {
+    app.console.message('caution', `The observer was not moved: ${error.message}`, 'nav');
+  }
+  app.pages.ENV?.render(true);
+};
 app.adoptAcquisition = (a) => {
   if (!a) return;
   app.acquisitionState = a;
@@ -304,6 +326,9 @@ function initPointer(canvas) {
     app.scene.setFeature('chosen', key, [hit], { kind: 'mark', colour: 0xee8fbd });
     app.console.show('left', 'NAV');
     app.pages.NAV.choose(app.picked);
+    // The observer's instruments follow the point chosen, unless ENV's switch says otherwise.
+    if (app.observerFollows) app.setObserver(address);
+    else app.pages.ENV?.render(true);
     app.putAddress(address);
   });
 }
@@ -388,9 +413,27 @@ function frame(now) {
   const { P, stats } = app.scene.draw({ cam, bodies, altitude: app.altitude, starBrightness: starBrightness(bodies, cam) });
   app.stats = stats;
   drawLabels(bodies, P, sats);
+  app.north = northOnScreen(bodies, P);
+  app.fields?.tick(tt);
   const st = stats[app.nav.focus];
   if (st?.loading > 0) setTimeout(app.touch, 200);
 }
+// The direction on the screen of the focus body's north at the view's target: the target and a point
+// a hundredth of the range north of it (along the meridian, toward the body's rotation pole), both
+// projected. Read from the picture, it holds for any heading, tilt or following of the stars; it is
+// null in a flight between bodies, or where the target is not on the screen.
+function northOnScreen(bodies, P) {
+  if (app.nav.transfer) return null;
+  const key = app.nav.focus, B = bodies[key], body = app.scene.bodies[key], v = app.nav.controls.view;
+  if (!B || !body) return null;
+  const project = projector(app.scene);
+  const at = (q) => { const w = apply(B.rotation, q); return project([w[0] + B.position[0] - P[0], w[1] + B.position[1] - P[1], w[2] + B.position[2] - P[2]]); };
+  const t = cartesian(body.fig, v.lon, v.lat, v.height), N = localFrame(v.lon, v.lat)[1], step = 0.01 * v.range;
+  const a = at(t), b = at([t[0] + step * N[0], t[1] + step * N[1], t[2] + step * N[2]]);
+  if (!a || !b || Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-3) return null;
+  return Math.atan2(b[0] - a[0], a[1] - b[1]);
+}
+
 // The stars fade within the sunlit air of the Earth.
 function starBrightness(bodies, cam) {
   if (app.nav.focus !== 'earth' || app.altitude > 8e4 || app.nav.transfer) return 1;
@@ -410,8 +453,11 @@ function status() {
   app.console.setLamp('clk', Math.abs(away) > 60 ? 'advisory' : 'good', Math.abs(away) > 60 ? 'The world is not at the present: physical instruments read the present beside it' : 'The world at the present');
   if (!app.scene) return;
   const v = app.nav.controls.view;
-  $('#compass-needle').setAttribute('transform', `rotate(${(-v.heading / DEG).toFixed(2)} 20 20)`);
   const name = app.scene.bodies[app.nav.focus]?.name || '';
+  const rose = $('#compass');
+  rose.classList.toggle('off', app.north === null || app.north === undefined);
+  if (app.north !== null && app.north !== undefined) $('#compass-needle').setAttribute('transform', `rotate(${(app.north / DEG).toFixed(2)} 20 20)`);
+  rose.title = `${name}'s north at the centre of the view, toward its rotation pole (not a magnetic compass: that is an instrument, in ENV). A click turns north up.`;
   $('#hud-focus').textContent = app.nav.transfer ? `→ ${app.scene.bodies[app.nav.transfer.key].name}` : `${name} · ${length(v.range)}`;
   app.console.markFocus(app.nav.transfer ? app.nav.transfer.key : app.nav.focus, name);
   $('#eye').textContent = `eye ${length(app.altitude)}`;
@@ -540,6 +586,7 @@ async function main() {
   resize();
 
   app.satellites = new SatelliteLayer(app);
+  app.fields = new FieldLayers(app);
   if (Array.isArray(saved?.satellites)) app.satellites.groups = saved.satellites;
   app.bus = new BusClient();
 

@@ -244,6 +244,38 @@ if (!state || !state.built || !state.data.ephemeris) {
   assert('instruments: the engine\'s families, the clock to the radiosonde',
     ['clock.scales', 'position.truth', 'sun.sensor', 'sky.bodies', 'gnss.receiver', 'gravimeter.body', 'magnetometer.wmm2025', 'atmosphere.ussa1976', 'radiosonde.ussa1976'].every((f) => families.includes(f)), families.join());
   assert('instruments: every family is one of the kernels, with a provenance', (ins.families || []).every((f) => kernels.has(f.kernel) && f.provenance));
+  assert('instruments: the compass and the Moon\'s magnetometer are families of the engine', ['compass.magnetic', 'magnetometer.moon'].every((f) => families.includes(f)));
+  const classes = new Set((ins.kernels || []).map((k) => k.class));
+  const declared = ins.declared || [];
+  assert('instruments: the encyclopedia\'s 101 families are declared, each bound to one of the twelve kernel classes',
+    declared.length === 101 && classes.size === 12 && declared.every((d) => classes.has(d.class)), `${declared.length} declared, ${classes.size} classes`);
+  assert('instruments: a declared family with a model names the engine\'s families that carry it',
+    declared.filter((d) => d.implemented).length >= 20 && declared.find((d) => d.code === 'C01')?.engine_families?.includes('magnetometer.moon'));
+
+  // ---- the fields: the Earth's field lines, the Moon's crustal field -----------------------------------------------
+  const fl = ask({ op: 'field_lines', body: 'earth', time: '2026-10-28T12:00:00Z' });
+  const RE = 6371.2e3, radius = (q) => Math.hypot(q[0], q[1], q[2]);
+  const radii = (fl.lines || []).flat().map(radius);
+  assert('field lines: 48 lines of WMM2025 in the ITRS, between the ground and six Earth radii',
+    fl.frame === 'ITRS' && fl.lines?.length === 48 && radii.every((r) => r >= RE && r <= 6.2 * RE), `${fl.lines?.length} lines, ${radii.length} points`);
+  // A line from 30° of latitude is closed: both its ends at the ground, in opposite hemispheres, its apex
+  // within two Earth radii, as a dipole's from λₘ = 30 ± 15° of geomagnetic latitude (L = 1/cos²λₘ, 1.07
+  // to 2.0: the dipole's axis is some 10° from the rotation's, and the field is not a dipole's).
+  const low = (fl.lines || []).filter((l) => l.some((q) => Math.abs(Math.asin(q[2] / radius(q))) > 25 * Math.PI / 180 && Math.abs(Math.asin(q[2] / radius(q))) < 35 * Math.PI / 180) && Math.max(...l.map(radius)) < 2 * RE);
+  const closed = low.filter((l) => radius(l[0]) < RE + 150e3 && radius(l[l.length - 1]) < RE + 150e3 && Math.sign(l[0][2]) !== Math.sign(l[l.length - 1][2]));
+  assert('field lines: those from ±30° close, from the ground to the ground across the magnetic equator, their apex 1.05 to 2 Earth radii',
+    low.length >= 8 && closed.length === low.length && closed.every((l) => { const a = Math.max(...l.map(radius)) / RE; return a > 1.05 && a < 2; }),
+    `${closed.length} of ${low.length}`);
+  const map = ask({ op: 'field_map', body: 'moon', quantity: 'total', step_deg: 2 });
+  const packed = ask({ op: 'field_map', body: 'moon', quantity: 'total', step_deg: 2, encoding: 'f32' });
+  const f32 = packed.values_f32 ? new Float32Array(Uint8Array.from(Buffer.from(packed.values_f32, 'base64')).buffer) : [];
+  assert('field map: the Moon\'s crust on a grid of 2°, 90 rows of 180, its |B| from T2015_449 between a hundredth and a thousand nanotesla',
+    map.nlat === 90 && map.nlon === 180 && map.values?.length === 90 * 180 && map.min > 1e-11 && map.max < 1e-6 && map.frame === 'MOON_ME', `${map.min} to ${map.max} T`);
+  assert('field map: as float32 in base64 it carries the same values, to float32\'s precision',
+    f32.length === 90 * 180 && map.values.every((x, i) => Math.abs(f32[i] - x) <= 1e-7 * Math.abs(x)));
+  const radial = ask({ op: 'field_map', body: 'moon', quantity: 'radial', step_deg: 2 });
+  assert('field map: its radial component takes both signs and is never larger than |B|',
+    radial.min < 0 && radial.max > 0 && radial.values?.every((x, i) => Math.abs(x) <= map.values[i] * (1 + 1e-12)));
 
   // ---- coordinates: the top of the Eiffel Tower ----------------------------------------------------------
   const eiffel = { system: 'geodetic', latitude_deg: 48.8584, longitude_deg: 2.2945, height_m: 330 };

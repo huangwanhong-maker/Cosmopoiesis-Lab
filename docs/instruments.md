@@ -2,12 +2,12 @@
 title: The Instruments of Cosmopoiesis
 status: draft
 date: 2026-10-28
-implemented-by: [engine/observation.hpp, engine/instruments.hpp, engine/environment.hpp, runtime.py]
+implemented-by: [engine/observation.hpp, engine/instruments.hpp, engine/environment.hpp, engine/lunar.hpp, engine/declared.hpp, runtime.py]
 ---
 
 # The Instruments of Cosmopoiesis
 
-*Status: draft, 2026-10-28.* This note says what an instrument is in Cosmopoiesis, and maps the encyclopedia of scientific instruments that the user gave (sections A to J, some ninety families and several hundred makes and methods) onto the kernels of observation of the formalism ([§8.5](formalism.md), Table 8.1). It records which families the engine and the server have and which are planned, and how a new one is added. The decision is [0004](../development/decisions/0004-instruments-and-their-acquisition.md).
+*Status: draft, 2026-10-28.* This note says what an instrument is in Cosmopoiesis, and maps the encyclopedia of scientific instruments that the user gave ([its tables](encyclopedia-of-instruments.md): sections A to J, 101 families and several hundred makes and methods) onto the kernels of observation of the formalism ([§8.5](formalism.md), Table 8.1). It records which families the engine and the server have and which are planned, and how a new one is added. The decision is [0004](../development/decisions/0004-instruments-and-their-acquisition.md).
 
 ## 1. Four Things That Are Not One
 
@@ -20,7 +20,7 @@ The encyclopedia itself insists on a distinction, and the registry keeps it: *gr
 | **a sensor** | a family mounted somewhere, with a timing | a session's declared set (`SensorSpec`): an id, a family, a mount, a clock, a period, a deadline, a criticality |
 | **a product** | data derived from readings by a declared method: a map, an analysis, a reconstructed state | the data library's products, and the readings of estimators (provenance assimilated) |
 
-An instrument is not a class of its own. A fluxgate, a SQUID and an NV-centre magnetometer are one point probe of $B$ with different noise, bandwidth and range: a family with parameters, which is data. A class is written where the observation operator differs, which happens twelve times, and not where the device's make differs, which happens hundreds of times.
+A make is not a class of its own. A fluxgate, a SQUID and an NV-centre magnetometer are one point probe of $B$ with different noise, bandwidth and range: a family with parameters, which is data. An abstract class is written where the observation operator differs, which happens twelve times; each family with a model is a final class deriving from its kernel's; and the encyclopedia's other families are declared as data bound to the class they would derive from (§6).
 
 ## 2. The Kernels
 
@@ -51,7 +51,7 @@ Each family of the encyclopedia is given its kernel or kernels, what it reads in
 |---|---|---|---|---|
 | A01 | Time and frequency metrology | clock | a worldline · its proper time against a scale | `clock.scales` (the time scales, metrology); `clock.ntp` (the host's clock against NTP, physical) |
 | A02 | Position and ranging | ranging | worldlines of emitters · ranges and delays | `gnss.receiver` (GPS and Galileo by SGP4, dilution of precision, σ_UERE = 3 m) |
-| A03 | Orientation and attitude | line of sight; point probe | directions of the Sun, stars, the limb; $B$ and $g$ for a compass and an inclinometer | `sun.sensor` (the Sun's direction); star trackers planned with an agent's attitude |
+| A03 | Orientation and attitude | line of sight; point probe | directions of the Sun, stars, the limb; $B$ and $g$ for a compass and an inclinometer | `sun.sensor` (the Sun's direction); `compass.magnetic` (WMM2025, near the ground, refused in the blackout zones); star trackers planned with an agent's attitude |
 | A04 | Inertial measurement | proprioceptive | an agent's worldline · specific force, angular rate | planned: an agent's dynamics (slice 2) |
 | A05 | Motion and odometry | proprioceptive; line of sight; ranging | an agent's motion; the scene | planned: agents |
 | A06 | Contact and force | point probe on a port; event detector | an interface between an agent and the ground · traction | planned: ports (formalism §8.1) |
@@ -78,7 +78,7 @@ Each family of the encyclopedia is given its kernel or kernels, what it reads in
 
 | Code | Family | Kernels | Reads (base · fibre) | In Cosmopoiesis |
 |---|---|---|---|---|
-| C01 | Magnetic-field sensing | point probe | a region · $B$ | `magnetometer.wmm2025`; `swpc.imf`, the field at L1 (physical) |
+| C01 | Magnetic-field sensing | point probe | a region · $B$ | `magnetometer.wmm2025`; `magnetometer.moon` (the crust from T2015_449, assimilated; synthetic small scales; the solar wind's field); `swpc.imf`, the field at L1 (physical) |
 | C02 | Magnetic gradients and material response | point probe of $\nabla B$; protocol | a region · $\nabla B$; a sample · magnetisation | planned: WMM's gradient is computable |
 | C03 | Electric fields and charge | point probe | a region · $E$, potential | planned |
 | C04 | Electric circuits | point probe on a network | a circuit graph · currents (1-cochains), potentials (0-cochains) | planned |
@@ -115,7 +115,7 @@ Each family of the encyclopedia is given its kernel or kernels, what it reads in
 | E01 | Seismology | point probe; event detector | the solid region · ground motion; the earthquakes | `usgs.quakes`, the catalogue's events (physical; criticality 3 at M ≥ 7) |
 | E02 | Geodetic deformation | ranging; footprint | the surface · displacement | planned: the Earth Atlas's GNSS velocities |
 | E03 | Gravity surveys | point probe | a region · $g$, the 1-form $-dU$ | `gravimeter.body`: WGS 84's normal gravity on the Earth, a rotating point mass elsewhere |
-| E04 | Magnetic geophysics | point probe | a region · the crust's $B$ | `magnetometer.wmm2025` gives the main field only |
+| E04 | Magnetic geophysics | point probe | a region · the crust's $B$ | `magnetometer.moon`, the Moon's crust; `magnetometer.wmm2025` gives the Earth's main field only, not its crust |
 | E05 | Electrical geophysics | footprint (an inverse problem) | the subsurface · conductivity | planned |
 | E06 | Electromagnetic sounding | footprint; protocol | the subsurface · conductivity | planned |
 | E07 | Drilling and boreholes | footprint on a curve (a log) | a borehole, a 1-stratum · rock properties | planned |
@@ -199,9 +199,10 @@ As the encyclopedia says, a quantum instrument does not read a pre-existing clas
 | J06 | Ideal numerical probes | a provenance, not a family: any kernel on the snapshot, model provenance, no noise | the world's fields | `position.truth` |
 | J07 | Derived computational probes | estimator on the snapshot | derived quantities and residuals | planned: the balance residuals of formalism §5.5 are such probes |
 | J08 | Synthetic and generative sources | a provenance, not a family: any kernel reading a synthetic field | synthetic fields | the page's synthetic terrain, drawn violet |
-| J09 | Data-fusion estimators | estimator, provenance assimilated | other readings | planned: the inference foundation |
+| J09 | Data-fusion estimators | estimator, provenance assimilated | other readings · inferred states and their uncertainties | planned: the inference foundation |
+| J10 | Simulation validation monitors | estimator on the run | the run's own state · residuals, errors, convergence | planned: the runs of slice 0 (the balance residuals of formalism §5.5) |
 
-*Caveat.* The message that gave the encyclopedia was cut at J09, at the limit of 50,000 characters, so J09 is mapped from its name alone, and any families after it were not seen.
+J06 to J10 are, as the encyclopedia itself says of them, not physical sensors: their readings are labelled by their provenance (model, synthetic, assimilated), never as measurements.
 
 ## 4. A Critique of the Encyclopedia
 
@@ -213,16 +214,83 @@ The encyclopedia is broad and its examples are right; as a registry it needs fiv
 4. **Not every instrument samples an instant.** The protocols of sections G and H (a mass spectrum, a sequence) are hybrid automata of stages with latencies; the counters of C11, F03 and I05 integrate over windows; a radiosonde's column is a footprint over a path. The kernels say so, and the runtime's timing of a job is its kernel's.
 5. **The makes are parameters.** Within a family the listed instruments differ by noise, range, bandwidth, latency and field of view (§2). They are rows of parameters of one kernel, and no class is written for any of them.
 
-## 5. Adding an Instrument
+## 5. A Critique of the Axes, the Engines and the Envelope
+
+The user's proposal for a C++ architecture of the catalogue has three parts: six independent axes for the registry (K), ten measurement engines to implement first (L), and an envelope common to every observation (M). Each part is close to the design here, and each has one change to make.
+
+### 5.1 The Six Axes
+
+| Axis | Kept as | Why |
+|---|---|---|
+| physical domain | a tag (the encyclopedia's code) | the same instrument lies in several domains (§4.2); a key must be a function of the instrument |
+| measurement support | the kernel's chain, in every reading's envelope | point, line, surface and volume are chains; ray and beam are a cone of directions (line of sight, ranging); a trajectory is the agent's own state; the time interval belongs to every reading, so it is not one value of the axis among others |
+| interaction mechanism | each family's interaction: passive, active, contact, destructive, mixed | it is two axes, not one: whether the instrument emits or touches (active, contact) and whether it consumes what it measures (destructive) are independent of each other, and "non-contact" is the complement of contact, not a value beside passive |
+| output type | the fibre, sampled on the support | waveform, image, spectrum and point cloud are a fibre over a sampled support (time, directions, frequencies, ranges in many directions), not types of their own; an event is a process (formalism §3.5) |
+| acquisition origin | provenance (formalism Definition 8.7) | hardware is physical, a historical record archive, a simulation model, a generative model synthetic, an estimator assimilated |
+| temporal behaviour | a family's natural timing; a sensor's timing when mounted | the same magnetometer may be read periodically or on demand: timing belongs to the mounting (formalism §8.6); a long experiment is the protocol kernel |
+
+The proposal is right that not every combination is valid: acoustic pressure in a vacuum has no value. That is coverage (formalism Definition 8.5): an acoustic family's coverage is the fluid regions of the stratification (§1.2), and outside it a reading is *outside*, never zero.
+
+Its unified model, $Y_s=\mathcal H_s[\mathfrak W|_{\mathcal D_s},\Theta_s,U_s]+\varepsilon_s$, is Definition 8.5's with two arguments made explicit: the configuration $\Theta_s$ is the family's parameters and the mount's settings (`MountState::settings`), and the active input $U_s$ is the port of an active instrument. The additive error is one case among several, as the proposal says: the counter's is Poisson and the quantum kernel's is Born's rule. Its other requirement, that observation may change the world, is taken in full. Formalism §8.5's remark gives it its general form, an instrument in the sense of Davies and Lewis: a joint law of the outcome and the state after it. In the world system an active instrument is a component with a port.
+
+### 5.2 The Ten Engines
+
+The engines are close to the kernels, and one of them is not an observation operator at all:
+
+| Engine | Kernels |
+|---|---|
+| field sampling | point probe, footprint |
+| kinematic measurement | proprioceptive |
+| ray and beam propagation | line of sight; ranging for lidar and radar |
+| wave propagation | *a model of the world, not an instrument*: a microphone is a point probe of pressure; the propagation of sound is acoustics, which every instrument reading that field shares |
+| radiation and particles | counter |
+| spectroscopic measurement | line of sight with a spectral response; protocol for chemical spectrometers |
+| interaction and contact | point probe or footprint with a contact interaction |
+| stochastic events | counter, event detector |
+| sample analysis | protocol |
+| computed observation | estimator; the synthetic and model provenances |
+
+The change is one of placement: wave, radiation and particle propagation belong to the world's models (the domains, physis's fields), so that two instruments reading the same sound or the same light read one field, computed once. An engine that propagated waves for its own sensors would compute that field once for every instrument that reads it. The proposal's levels of fidelity are kept, as parameters of a family (an ideal probe; one with a response, a noise and a bandwidth). Its priorities are met in this slice: field sampling (the magnetometers, the gravimeter, the barometer, the radiosonde), kinematics (the true position), rays (the Sun sensor, the sky) and events (flares, protons, earthquakes, guards). Waves wait for a model of the world to propagate them.
+
+### 5.3 The Envelope
+
+| Field of `ObservationEnvelope` | In a reading |
+|---|---|
+| sensor, measurement | `sensor`, `measurement` ($k@n$) |
+| observation interval, reception time | `interval`; `start_wall`, `end_wall`, `delivered_wall` |
+| reference frame, measurement support | `frame`, `support` |
+| quantity, payload | the family's quantities with their units; `values` |
+| uncertainty | partly: a declared $\sigma$ where a family has one (GNSS's ranging error, WMM's uncertainty of declination); not yet a law for every value |
+| provenance | `provenance`, and `provenance_of_parts` where parts differ (the lunar magnetometer's crust, finer scales and solar wind) |
+| quality | `quality`: valid, outside, missing, invalid |
+| simulation snapshot | `snapshot`, absent for a physical reading |
+
+Added to it: the `interaction`, and the `reason` of every reading that is not valid. The proposal's three cases of absence are the three qualities that are not valid: a physically undefined quantity is *outside*, a missing value *missing*, an invalid measurement *invalid* (formalism Definition 8.9). Like ROS 2's typed messages, the envelope carries a stamp and a frame, and it adds the support, the provenance and the world's snapshot.
+
+## 6. The Classes and the Declared Families
+
+The user asked for classes for as many families as possible, which developers and users could see but which produce no data until they are implemented. The engine has three layers:
+
+1. **`Instrument`** (`engine/observation.hpp`), the abstract sensor: `info()`, `coverage()`, `measure()`, and `kernel()` and `support()`, which name its operator.
+2. **Twelve kernel classes**, abstract, one for each operator of §2: `PointProbe`, `Footprint`, `LineOfSight`, `Ranging`, `Counter`, `EventDetector`, `Proprioceptive`, `ClockReading`, `Protocol`, `QuantumMeasurement`, `Estimator`, `Feed`. Each fixes `kernel()` and the kind of chain its readings pair with.
+3. **A family with a model** is a final class deriving from its kernel's: the magnetometer of WMM2025 and the compass derive from `PointProbe`, the radiosonde from `Footprint`, the Sun sensor from `LineOfSight`, the GNSS receiver from `Ranging`, the true position from `Proprioceptive`, the time scales from `ClockReading`. The registry refuses a family whose class's kernel is not the one it declares.
+
+The encyclopedia's 101 families are declared beside them (`engine/declared.hpp`, generated by `engine/tools/make_declared.py` from the encyclopedia and from §3 here). Each row gives the code and title, the kernel class a model would derive from, what the family reads, its instruments, its observables, its interaction, its temporal behaviour and its state; the `instruments` operation lists them, and INSTR shows them by section. A declared family without a model is refused when it is mounted ("the family C06 (Radar sensing) is declared, not implemented: planned"). It yields no reading, so no value appears without a model.
+
+*Rationale.* A family is declared as a row of data rather than as an empty abstract class of its own. An empty class says nothing its row does not say, and 101 of them would be 101 places to keep in step with the encyclopedia by hand. A generated table is checked: there are 101 rows, each is bound to one of the twelve classes, each is refused when mounted. It changes when the encyclopedia changes. A developer who writes a family reads its row, derives from the class it names, and gives its `InstrumentInfo` the row's code; the row then counts as implemented and lists the engine's family.
+
+## 7. Adding an Instrument
 
 - **A new make of an existing family** is a parameter set: no code.
-- **A new family on an existing kernel** is a registry entry (an `InstrumentInfo`: its key, its title, its encyclopedia code, its kernel, its provenance, its quantities with units, its cost, its default period, its model, its references) and the function from a snapshot and a mount to a reading, which calls the domain whose model it reads (`engine/instruments.hpp`, `engine/environment.hpp`); a physical source is an adapter of the server (`runtime.py`). Its coverage is declared with it, and a reading outside it says why.
+- **A new family on an existing kernel** is a final class deriving from that kernel's class, with its `InstrumentInfo` (its key, its title, its encyclopedia code, its kernel, its provenance, its quantities with units, its cost, its default period, its model, its references), its coverage, and its `measure()`, the function from a snapshot and a mount to a reading, which calls the domain whose model it reads (`engine/instruments.hpp`, `engine/environment.hpp`, `engine/lunar.hpp`). A physical source is an adapter of the server (`runtime.py`). Outside its coverage a reading says why. Where its model's data are absent it is *missing*, and where its operator is ill-posed *invalid*.
 - **A new kernel** is warranted only when the observation operator differs from all twelve. It is a decision, recorded.
 
-Every family is checked against its model's reference (the domain's own checks hold the model; Cosmopoiesis's hold the plumbing: instants, units, coverage, determinism; [tests/check_runtime.py](../tests/check_runtime.py)).
+Every family is checked against its model's reference (the domain's own checks hold the model; Cosmopoiesis's hold the plumbing: instants, units, coverage, determinism; [tests/check_runtime.py](../tests/check_runtime.py)). The Moon's magnetometer is held to pyshtools on the same model ([tests/make_fixtures.py](../tests/make_fixtures.py)).
 
-## 6. Open Questions
+## 8. Open Questions
 
 - **A sixth provenance.** SWPC's planetary $K$ index is derived from ground magnetometers by a fixed method, without a model of the world: neither a direct measurement nor an assimilation. It is counted as physical; a class *derived* may be needed.
 - **Physical instruments of the user's own.** The observation edge's stations (`observation/sensors`) arrive as one adapter; each station's instruments should become sensors of their own families, with their makes' parameters.
+- **An uncertainty for every reading.** A declared $\sigma$ is carried where a family has one. The envelope should carry a law (a covariance in the quantity's units, or samples) for every value, and estimators should consume it.
+- **Back-action.** No instrument of this slice acts on the world. The first active family (a radar, a laser altimeter) needs the world system's ports (formalism §5.4) and a field to emit into.
 - **Where the kernels belong.** The twelve kernels name no object in nature. If a second work needs them (the Earth Atlas's observations, the Brain Atlas's forward models), they belong in a foundation, with the registry in the observation edge.

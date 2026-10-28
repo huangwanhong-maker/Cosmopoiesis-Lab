@@ -204,6 +204,10 @@ input[type=range] { accent-color: var(--rose); }
 .status.critical { color: var(--status-critical); } .status.critical::before { content: '■'; }
 .legend .swatch { display: inline-block; width: 10px; height: 10px; vertical-align: -1px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 8px; font-size: 12.5px; }
+details.declared { margin: 2px 0; }
+details.declared summary { cursor: pointer; padding: 3px 0; border-bottom: 1px solid var(--hair); }
+.status.muted { color: var(--ink-3); } .status.muted::before { content: "○"; }
+.legend .ramp { display: inline-block; width: 96px; height: 9px; vertical-align: -1px; border: 1px solid var(--hair); }
 .bus-row { display: grid; grid-template-columns: 96px 1fr auto; gap: 2px 8px; padding: 4px 2px; border-bottom: 1px solid var(--hair); align-items: baseline; }
 .bus-row .title { color: var(--ink); }
 .bus-row .sensor { grid-column: 1 / 3; color: var(--ink-3); font-size: 12px; }
@@ -283,6 +287,7 @@ svg.chart .hit { fill: transparent; }
 .compass .north { fill: var(--rose); }
 .compass .south { fill: var(--ink-3); }
 .compass text { font-family: var(--serif); font-size: 7px; fill: var(--ink-2); }
+.compass.off #compass-needle { opacity: 0.25; }
 
 /* ---- cards over the view ------------------------------------------------------------------------------ */
 .card { position: fixed; z-index: 7; width: 300px; padding: 10px 12px; }

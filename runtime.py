@@ -281,6 +281,7 @@ class SwpcWind(Adapter):
         row = next((r for r in rows if r.get("active") and r.get("proton_speed") is not None), None)
         if row is None:
             raise ValueError("no active spacecraft's plasma in the feed")
+        ctx.set_input("speed", {"speed_m_s": row["proton_speed"] * 1e3, "speed_tt_s": tt_of_unix(unix_of_iso(row["time_tag"]))})
         return self.reading(job, {"speed_m_s": row["proton_speed"] * 1e3, "density_m3": (row.get("proton_density") or float("nan")) * 1e6,
                                   "temperature_K": row.get("proton_temperature"), "spacecraft": row.get("source")},
                             {"speed_m_s": "m/s", "density_m3": "m⁻³", "temperature_K": "K"}, unix_of_iso(row["time_tag"]))
@@ -289,7 +290,7 @@ class SwpcWind(Adapter):
 class SwpcImf(Adapter):
     id, family, title, kernel, provenance = "swpc.imf", "feed.swpc.imf", "Interplanetary magnetic field", "feed", "physical"
     period_s, criticality = 60.0, 1
-    about = "NOAA SWPC real-time magnetometer at L1, GSM axes, one-minute values"
+    about = "NOAA SWPC real-time magnetometer at L1, GSM and GSE axes, one-minute values; its GSE series drives the Moon's virtual magnetometers"
 
     def run(self, job, ctx):
         rows = fetch_json(SWPC["rtsw-mag"]["url"])
@@ -297,10 +298,18 @@ class SwpcImf(Adapter):
         if row is None:
             raise ValueError("no active spacecraft's field in the feed")
         nt = 1e-9
+        # The active spacecraft's last six hours, for the virtual magnetometers on the Moon, which take the
+        # value measured at L1 one solar-wind travel time before (about an hour).
+        series = sorted([tt_of_unix(unix_of_iso(r["time_tag"])), r["bx_gse"] * nt, r["by_gse"] * nt, r["bz_gse"] * nt]
+                        for r in rows if r.get("active") and r.get("bx_gse") is not None and r.get("source") == row.get("source"))
+        ctx.set_input("imf", {"imf_gse": series[-360:], "spacecraft": row.get("source")})
         return self.reading(job, {"total_T": row["bt"] * nt, "bx_gsm_T": row["bx_gsm"] * nt, "by_gsm_T": row["by_gsm"] * nt,
-                                  "bz_gsm_T": row["bz_gsm"] * nt, "frame": "GSM", "spacecraft": row.get("source")},
-                            {"total_T": "T", "bx_gsm_T": "T", "by_gsm_T": "T", "bz_gsm_T": "T"}, unix_of_iso(row["time_tag"]),
-                            about="GSM: x toward the Sun, z the projection of the geomagnetic dipole's axis (a frame of the magnetosphere, not yet in the catalogue)")
+                                  "bz_gsm_T": row["bz_gsm"] * nt, "bx_gse_T": row["bx_gse"] * nt, "by_gse_T": row["by_gse"] * nt,
+                                  "bz_gse_T": row["bz_gse"] * nt, "frame": "GSM", "spacecraft": row.get("source")},
+                            {"total_T": "T", "bx_gsm_T": "T", "by_gsm_T": "T", "bz_gsm_T": "T", "bx_gse_T": "T", "by_gse_T": "T", "bz_gse_T": "T"},
+                            unix_of_iso(row["time_tag"]),
+                            about="GSM: x toward the Sun, z the projection of the geomagnetic dipole's axis; GSE: x toward the Sun, "
+                                  "z the ecliptic's pole (frames of the magnetosphere, not yet in the catalogue)")
 
 
 class SwpcKp(Adapter):
@@ -464,12 +473,18 @@ def adapters() -> list[Adapter]:
 
 # ---- the engine's sensors ----------------------------------------------------------------------------
 
-TRANQUILITY = "moon(0.674 N, 23.473 E)"  # Tranquility Base, the Apollo 11 site, to about 30 m
+TRANQUILITY = "moon(0.674 N, 23.473 E)"
+# Reiner Gamma, the swirl of Oceanus Procellarum, on one of the Moon's strongest anomalies; and 30 km
+# above it, the height of Lunar Prospector's lowest passes.
+REINER_GAMMA = "moon(7.5 N, 59.0 W)"
+REINER_GAMMA_30KM = "moon(7.5 N, 59.0 W, 30 km)"  # Tranquility Base, the Apollo 11 site, to about 30 m
 
 
 def virtual_sensors() -> list[dict]:
-    """The session's virtual instruments: an environment suite at the observer, a clock, the ISS and a
-    station on the Moon."""
+    """The session's virtual instruments: an environment suite at the observer (a compass and the Moon's
+    magnetometer among them, each answering only where it can), a clock, the ISS, a station at
+    Tranquility Base, and magnetometers on and over Reiner Gamma, one of them with the crust's scales
+    finer than the data drawn from their law."""
     s = [
         {"id": "clock", "family": "clock.scales", "period_s": 1, "criticality": 2},
         {"id": "observer.position", "family": "position.truth", "mount": "observer", "period_s": 1, "criticality": 1},
@@ -486,6 +501,13 @@ def virtual_sensors() -> list[dict]:
         {"id": "tranquility.sun", "family": "sun.sensor", "mount": TRANQUILITY, "title": "Sun at Tranquility Base", "period_s": 5, "criticality": 0},
         {"id": "tranquility.sky", "family": "sky.bodies", "mount": TRANQUILITY, "title": "Sky at Tranquility Base", "period_s": 10, "criticality": 0},
         {"id": "tranquility.gravity", "family": "gravimeter.body", "mount": TRANQUILITY, "title": "Gravity at Tranquility Base", "period_s": 30, "criticality": 0},
+        {"id": "observer.compass", "family": "compass.magnetic", "mount": "observer", "period_s": 1, "criticality": 1},
+        {"id": "observer.moon_magnetometer", "family": "magnetometer.moon", "mount": "observer", "period_s": 2, "criticality": 0},
+        {"id": "tranquility.magnetometer", "family": "magnetometer.moon", "mount": TRANQUILITY, "title": "Magnetometer at Tranquility Base", "period_s": 5, "criticality": 0},
+        {"id": "reiner_gamma.magnetometer", "family": "magnetometer.moon", "mount": REINER_GAMMA, "title": "Magnetometer on Reiner Gamma",
+         "period_s": 5, "criticality": 0, "settings": {"synthetic": True}},
+        {"id": "reiner_gamma.30km", "family": "magnetometer.moon", "mount": REINER_GAMMA_30KM, "title": "Magnetometer 30 km over Reiner Gamma",
+         "period_s": 5, "criticality": 0},
     ]
     return s
 
@@ -514,7 +536,8 @@ class Acquisition:
         # LIDAR, through the terrain probe) and the geoid 45.8 m above WGS 84 (EGM96): 91 m above the ellipsoid.
         self.observer = "earth(51.4769 N, 0.0005 W, 91 m)"
         self.observer_place: dict | None = None
-        self.policy = {"order": "edf", "aging": False, "aging_step_s": 0.05, "budget": 0.6, "target": 0.8}
+        # kernel: "probe" reports what the kernel would grant; "fifo" asks it for SCHED_FIFO for the engine's workers.
+        self.policy = {"order": "edf", "aging": False, "aging_step_s": 0.05, "budget": 0.6, "target": 0.8, "kernel": "probe"}
         self.servers = [{"name": "io", "budget_s": 2.0, "period_s": 10.0}]
         self.generation = -1
         self.configured: dict = {}
@@ -523,12 +546,20 @@ class Acquisition:
         self.trace: collections.deque = collections.deque(maxlen=8000)
         self.error: str | None = None
         self.now_requests: list[str] = []
+        self.inputs: dict = {}
+        self.inputs_changed = False
         self.thread = threading.Thread(target=self.loop, daemon=True, name="cosmopoiesis-acquisition")
 
     def start(self) -> None:
         self.thread.start()
 
     # -- what the adapters call back
+    def set_input(self, name: str, value: dict) -> None:
+        """A physical source's input for the virtual instruments (the solar wind's field and speed)."""
+        with self.lock:
+            self.inputs[name] = value
+            self.inputs_changed = True
+
     def event(self, e: dict) -> None:
         e.setdefault("event", True)
         self.events.put(e)
@@ -564,7 +595,7 @@ class Acquisition:
             for spec in changes.get("sensors_add") or []:
                 if not isinstance(spec, dict) or not str(spec.get("id", "")).startswith("user.") or spec.get("external"):
                     raise ValueError("a mounted instrument has an id beginning user. and is a virtual family")
-                self.extra = [x for x in self.extra if x["id"] != spec["id"]] + [{k: spec[k] for k in ("id", "family", "mount", "period_s", "criticality", "title") if k in spec}]
+                self.extra = [x for x in self.extra if x["id"] != spec["id"]] + [{k: spec[k] for k in ("id", "family", "mount", "period_s", "criticality", "title", "settings") if k in spec}]
             removed = set(changes.get("sensors_remove") or [])
             if removed:
                 self.extra = [x for x in self.extra if x["id"] not in removed]
@@ -576,6 +607,7 @@ class Acquisition:
             self.generation = self.engine.generation
             self.resolve_observer()
             self.now_requests += [s["id"] for s in self.sensors() if s.get("mount") == "observer"]
+            self.inputs_changed = True  # a new session has not been told the solar wind
             self.wake.set()
         return answer
 
@@ -625,8 +657,14 @@ class Acquisition:
             events.append(self.events.get_nowait())
         with self.lock:
             now, self.now_requests = self.now_requests, []
+            inputs = {}
+            if self.inputs_changed and self.inputs:
+                inputs = {"solar_wind": {**self.inputs.get("imf", {}), **self.inputs.get("speed", {})}}
+                self.inputs_changed = False
         request = {"op": "acquire.step", "session": "live", "clock": self.clock.for_engine(), "wall": time.time(),
                    "interval_s": self.interval, "external": external, "events": events, "now": now, "now_tt_s": tt_of_unix(time.time())}
+        if inputs:
+            request["inputs"] = inputs
         answer = self.engine.ask(request, timeout=20)
         if "error" in answer:
             if "no instrument" in answer["error"] or self.generation != self.engine.generation:

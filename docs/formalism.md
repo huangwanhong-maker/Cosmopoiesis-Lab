@@ -195,6 +195,55 @@ The five kinds above are points in this product: material domains are labels on 
 
 The first slice's phenomena are, in these terms: the standard atmosphere (pressure, temperature and density, 0-forms on the region above the geoid, functions of geopotential height alone; meteorology `atmosphere`); gravity (the 1-form $-dU$: WGS 84's normal gravity on the Earth, geodesy `gravity`, a rotating point mass elsewhere); the geomagnetic field (WMM2025, $B=-\nabla V$ on the region from 1 km below to 850 km above the ellipsoid; geophysics `geomagnetism`); sunlight (the radiance of the solar disc, integrated over it at an aperture); the solar wind (density and bulk speed, the first moments of its distribution on phase space, observed at L1 by SWPC); the planetary $K$ index (a quantity on time alone); earthquakes and solar flares (marked point processes on $M\times\mathbb T$ and on $\mathbb T$, marked by magnitude and class); satellites (configurations on worldlines, by SGP4).
 
+### 3.6 The Visual Expression of Phenomena
+
+A second classification offers itself for how phenomena are drawn: surfaces (the ground, terrain, boundaries), volumes (fluids, the distribution of a component, volume data), fields (colour maps, vectors, tensors, streamlines), waves and signals (amplitude, wavefronts, phase, spectra), and particles and objects (entities and their trajectories). Its premise is right and is kept: one phenomenon has several drawings. Its rows, like those of §3.5, answer different questions. "Surface" and "volume" name the base a drawing lies on; "field" names the channels of a fibre (a colour, an arrow, an ellipsoid, a curve); "particle and object" names a base (worldlines) together with a fibre (a pose, a counting measure); "wave and signal" names a process (a wavefront is a level set of a phase that moves in time) and a base (a signal is a field on time alone, a spectrum a field on frequencies). The magnetic field shows why the rows cannot be kinds: this slice draws it as curves through the volume about the Earth, as a colour on the Moon's surface and as a needle at a point, and it belongs to none of the rows more than to the others.
+
+A drawing is therefore not a kind of phenomenon but a composite map from the phenomenon to marks.
+
+**Definition 3.10 (a visual expression).** A visual expression of a phenomenon of kind (base $B$, fibre $F$, process) is a composite $\mathsf V=\mathsf M\circ\rho\circ r$ of:
+
+1. a *restriction* $r$ of the section to a sub-base $B'\to B$ on which it is drawn: the trace on a surface (the crust's field on the Moon's sphere, the temperature of the sea surface), a slice, a curve, a point, a worldline, or $B$ itself;
+2. a *reduction* $\rho\colon F\to F'$ of the fibre to what is shown: a norm ($\lvert B\rvert$), a component in a named frame ($B_r$; north, east and down), a moment or a marginal of a distribution (the solar wind's density and bulk speed from its distribution on phase space), an integral over the fibre's directions (the irradiance from the radiance), or the identity;
+3. a *mark* $\mathsf M$, whose geometry is decided by $B'$ and whose channels by $F'$.
+
+| Sub-base $B'$ | Geometry of the mark |
+|---|---|
+| a point, at an instant | a glyph, a gauge, a needle on a rose |
+| a worldline | a moving glyph and its trail; the path |
+| time alone | a strip (a time series); a lamp where a threshold is crossed |
+| a curve | a line, coloured along its length |
+| a surface (a 2-stratum: the ground, an interface) | a drape on the surface, or a displacement of it (relief) |
+| a region | slices and their drapes; isosurfaces; integral curves through it; volume rendering |
+| the radiation bundle at an aperture | an image (the sky, a camera's frame): the directions of the fibre become the picture's pixels |
+| phase space, frequencies | a reduction first (a moment, onto the region), or a chart of their own (a spectrum's plot) |
+| an abstract carrier (§11) | a drawing of the complex: its cells, nodes and edges |
+
+| Fibre $F'$ | Channels |
+|---|---|
+| a scalar | colour: sequential, one hue from light to dark; diverging about a natural zero, two hues and a clear or neutral middle; logarithmic where the values span decades |
+| a vector | integral curves (field lines, streamlines), arrows, or the line-integral convolution of a texture along the field |
+| a symmetric tensor | its principal axes: ellipsoids, or the integral curves of its largest eigenvector |
+| a label | a categorical hue or a texture, never ordered |
+| a configuration ($SE(3)$) | the body's shape, posed |
+| a counting measure | points; in its kinetic limit, a density |
+| a density operator | a point of the Bloch ball for a qubit; the moduli and phases of a matrix otherwise |
+
+| Process | Expression |
+|---|---|
+| a law of motion | the world's instant, moved by the mission clock; trails |
+| a jump (a point process) | a mark at the event's place and instant, a lamp, a line among the messages: never a frame of animation alone, which a reader would miss |
+| a propagation (a wave) | the level sets of a phase, moving (wavefronts); at a point, its signal; on frequencies, its spectrum |
+| a reaction network | its graph, with the flux on its edges |
+
+*Remark (invariance).* A drawing is the same in every frame exactly when its reduction is an invariant ($\lvert B\rvert$, a temperature) or names its frame (a component), and its restriction is carried by the frame change: this is §6.2's "observables are invariants" for pictures. A component is never drawn without its frame.
+
+*Rationale.* The split is the representation layer's (the infrastructure's [visualization](https://github.com/huangwanhong-maker/The-Science-Infrastructures/tree/main/visualization): a device-neutral scene, and a renderer for each technique): the restriction and the reduction are computation, the engine's, and travel as data with their units and frames (the field map restricts $B$ to the sphere and reduces it to $\lvert B\rvert$ or $B_r$; the field lines integrate $B/\lvert B\rvert$); the mark is a renderer's. A new renderer changes the marks, not the expressions.
+
+*Remark (hue and provenance).* The console reserves three families of hue for provenance (Definition 8.7). Where a field is drawn in colour its hue may be its provenance's and its magnitude carried by lightness and opacity: the Earth's field lines are modelled and drawn in the modelled blue; the Moon's crust is assimilated and drawn in gold, logarithmic from 1 nT, clear where the crust is weakly magnetised. Its diverging radial component takes orchid for the inward half, which is no provenance's hue.
+
+The slice's expressions, in these terms: the Earth's field lines ($B'$ the region from 100 km above the ground to six Earth radii, $F'=B$, integral curves); the Moon's crust ($B'$ the sphere of 1737.4 km, $F'=\lvert B\rvert$ or $B_r$, a drape); the compass ($B'$ a point, $F'$ the bearing of the horizontal field, a needle on a rose, and outside its coverage no needle but the reason); the body's north at the centre of the view (a point, the meridian's direction, projected: a needle); the space weather ($B'$ time alone, gauges) and its events (lamps and messages).
+
 ## 4. Matter and Constitution
 
 **Definition 4.1 (occupancy and constitution).** The *occupancy* of a world is a label field $\lambda$ with values in its finite set of materials; the material region of $m$ is $\Omega_m=\lambda^{-1}(m)$, and the regions of §1.2 are unions of material regions. A *constitutive relation* of a material is a map of quantity-valued bundles, with parameters $\theta\in\Theta$:
@@ -410,6 +459,16 @@ This is the property the timing of §8.6 is built on: timing is measured on the 
 
 **Definition 8.7 (provenance).** Every reading carries one of five provenances, which refine the channels of §9: *physical* (an instrument of the world, read now) and *archive* (a measurement recorded in a dataset) are observed; *model* is modelled; *assimilated* is reconstructed (an estimate joining observations and a model); *synthetic* is modelled by statistics without a physical law (a procedural terrain, a stochastic generator). A reading's provenance never changes by its being drawn, combined or zoomed; an estimator's reading is assimilated whatever its inputs were. The console draws the three channels in three hues, validated for the colour-vision deficiencies, and the subclasses by glyph (archive, synthetic), so that colour is never the only cue.
 
+**Definition 8.9 (the envelope of a reading).** Besides its values and their units, every reading carries: its *measurement*, $k@n$, the sensor and its tick; its *interval*, the instant $t_n$ or the window it integrates over; its *frame*, the frame its components are given in, where they are components; its *support*, the chain it pairs with (a point, a region, a cone, the paths of a ranging, a window, a guard, the agent's own state, an instant, a sample, a state, other readings: one for each kernel); its *snapshot*, the key of $\Sigma(t_n)$, absent for a physical reading; its *interaction*; its provenance; and its *quality* $q\in\{\text{valid},\text{outside},\text{missing},\text{invalid}\}$:
+
+- *outside*: $(\mu(t_n),t_n)\notin\mathcal A$; the quantity has no value there for the model (WMM on the Moon, salinity in the air), as opposed to the value zero (§3.2);
+- *missing*: inside the coverage, but the model's data are not on this computer;
+- *invalid*: inside the coverage, but the operator is ill-posed there. A compass reads the direction of the horizontal field $H$, and an error $\delta H_\perp$ across it turns the needle by $\delta D\approx\delta H_\perp/H$, without bound as $H\to0$; WMM declares a compass unreliable where $H<2000$ nT, the blackout zones about the magnetic poles, and to be used with caution below 6000 nT (Chulliat et al. 2025, §1.8). The compass answers *invalid* in the first, and reads with a caution in the second.
+
+*Remark (observation may change the world).* A kernel of Table 8.1 maps the world to a reading and leaves the world as it was. An active or invasive instrument changes it: radar and sonar emit, a probe loads what it touches, an assay consumes its sample, a measurement changes a quantum state. The general form is an *instrument* in the sense of Davies and Lewis (1970): a map from the world's state to a joint law of an outcome and a state after the measurement. Classically it is a Markov kernel $K(dy,dx'\mid x)$, with $x'=x$ for a passive instrument; quantum mechanically it is a completely positive instrument $\{\mathcal I_y\}$, with $P(y)=\operatorname{tr}\mathcal I_y(\rho)$ and the state $\mathcal I_y(\rho)/P(y)$ after it (Ozawa 1984). In the world system of §5.4 such an instrument is a component with a port (§8.1), coupled to the fields it emits into or touches. Every family declares its interaction (passive, active, contact, destructive, or mixed where its makes differ), and no instrument of this slice acts back on the world.
+
+**The encyclopedia's families, declared.** The engine writes a class for each kernel, from which each family with a model derives, and declares every family of the encyclopedia beside them: its kernel class, what it reads (base · fibre), its observables, its interaction and its temporal behaviour, generated from [the encyclopedia](encyclopedia-of-instruments.md) and [instruments.md](instruments.md). A declared family without a model is refused when it is mounted, and says so; it yields no reading, so that no value appears without a model behind it.
+
 ### 8.6 The Timing of Acquisition
 
 **Two clocks.** The *world's clock* reads TT, $t=t_0+r\,(w-w_0)$ in wall time $w$, at any real rate $r$: real time, faster, backwards, or held ($r=0$); the server keeps it, and every page and every instrument reads the same one. The *wall's clock* is the host's UTC, disciplined by NTP. A sensor ticks on one of them: a virtual instrument on the world's ($t_n=nT_k$), a physical feed on the wall's ($w_n=nT_k$).
@@ -428,9 +487,33 @@ This is the property the timing of §8.6 is built on: timing is measured on the 
 
 calx's checks hold both against the simulation: a low job beside a full stream runs, with aging of step 1, when its level has risen to the stream's; a server's stream receives at most $Uh+Q$ of the processor in $h$, and without the server the same stream makes the hard tasks miss.
 
-**What is not guaranteed.** The runtime runs on a general-purpose operating system (Windows on the development machine, Linux on the server) without a real-time scheduling class, so the timing is measured: each sensor's lateness is counted, and every job's start and end are kept and drawn. The values do not depend on the timing (Proposition 8.6). A deterministic simulation of the declared set (calx `simulate`) gives each policy's schedule in logical time, which is what the policies are compared on.
+**What is not guaranteed.** The runtime runs on a general-purpose operating system (Windows on the development machine, Linux on the server). The dispatcher's order is exact in logical time, but whether another process takes a worker's processor is the kernel's decision. The session therefore asks the kernel which real-time classes it would grant (Linux's SCHED_FIFO and SCHED_DEADLINE, each tried on a thread of its own and given back), reports the answer and the reason for a refusal, and, if the policy asks for it, raises its workers to SCHED_FIFO (calx `scheduler/kernel.hpp`). WSL 2 refuses both: the process lacks CAP_SYS_NICE and its RLIMIT_RTPRIO is 0, and the Linux kernel there is itself scheduled by Windows. Without a real-time class on a preemptible kernel the timing is measured, not bounded: each sensor's lateness is counted, and every job's start and end are kept and drawn. The values do not depend on the timing (Proposition 8.6). A deterministic simulation of the declared set (calx `simulate`) gives each policy's schedule in logical time, which is what the policies are compared on.
 
 *Remark (utility).* Choosing *which* observations are worth making (by their information about a quantity, the age of what is known of it, their cost) is a question of experimental design, with an answer in expected information gain (Lindley 1956; Chaloner and Verdinelli 1995) and in the age of information (Kaul, Yates and Gruteser 2012). It belongs to the planner that declares the sensors' periods and criticalities, at the pace of the science; the dispatcher's order is kept to policies that can be analysed. Decision [0004](../development/decisions/0004-instruments-and-their-acquisition.md) gives the reasons, against the design of a scheduler driven by a weighted utility.
+
+### 8.7 A Field Known in Part: Unresolved Scales and External Forcing
+
+The Moon's magnetometer is the slice's reading of a field known only in part. The Moon has no dynamo; the field at its surface is $B=B_{\text{crust}}+B_{\text{ext}}$, the remanence of its crust and the field the solar wind carries past it.
+
+The model of this section is the planetary-science domain's (its module `magnetism` and [its theory note](https://github.com/huangwanhong-maker/The-Science-Infrastructures/blob/main/domains/planetary-science/theory/magnetism.md)); the methods are physis's; the reading is the work's.
+
+**The crust.** T2015_449 is the crust's internal potential to degree 449 on a sphere of 1737.4 km: Tsunakawa et al. (2015)'s surface vector mapping of the magnetometers of Kaguya and Lunar Prospector, expanded by Wieczorek (2018). It is an assimilated model, the best estimate of the potential to its degree, and resolves scales of about $\pi a/449\approx12$ km; the field at the surface also has finer ones. The expansion holds outside the sources, and continued downward it would amplify the scales it cannot resolve by $(a/r)^{n+2}$: a mount on low ground below the sphere (the maria lie kilometres below it) reads the model's field at the sphere above it, and its reading says so.
+
+**Definition 8.10 (the spectral law).** The Lowes–Mauersberger spectrum of an internal potential at radius $a$ is $R_n=(n+1)\sum_{m=0}^n(g_{nm}^2+h_{nm}^2)$ (Lowes 1966). Its *spectral law* on a band $[n_1,n_2]$ is $\hat R_n=A\,n^{\beta}\rho^{2n}$, fitted by least squares to $\log R_n=\log A+\beta\log n+2n\log\rho$. A field continued upward by a depth $d$ is attenuated by $((a-d)/a)^{2n}$ at degree $n$, so for sources at a depth $d$ below the sphere the factor $\rho^{2n}$ gives $d=a(1-\rho)$ (Voorhies, Sabaka and Purucker 2002, whose law for a random layer of dipoles has this form). On $[30,250]$, T2015_449 gives $\beta=2.04$, $\rho=0.99621$ and $d=6.6$ km: an effective depth, of the sources and of the model's regularisation together, not a measured one.
+
+**Definition 8.11 (the unresolved part).** Let the prior of the coefficients be isotropic and Gaussian with the law's power: $g_{nm},h_{nm}\sim\mathcal N(0,s_n^2)$ independently ($h_{n0}=0$), with $(n+1)(2n+1)s_n^2=\hat R_n$. The model is the posterior mean given the data, $\bar g=\mathbb E[g\mid\text{data}]$, and by the law of total variance the power it leaves to the residual $g-\bar g$ is, on average over the data, $\hat R_n-\mathbb E[R_n^{\text{model}}]$. The unresolved part is drawn as
+$$
+u_{nm}\sim\mathcal N\big(0,\sigma_n^2\big),\qquad \sigma_n^2=\frac{\max\big(0,\hat R_n-R_n^{\text{model}}\big)}{(n+1)(2n+1)},\qquad 1\le n\le N,
+$$
+with $R_n^{\text{model}}=0$ above the model's degree, from a counter-based stream at the key (seed, Moon) (physis `analysis/random_field.hpp`). By default $N=720$; it adds at the model's highest degrees the power their regularisation removed, and above them the law's whole power.
+
+**Proposition 8.12.** The drawn part's expected spectrum is $\mathbb E[R_n(u)]=\max(0,\hat R_n-R_n^{\text{model}})$ at every degree, and a draw is a function of the seed alone.
+
+*Proof.* $\mathbb E[R_n(u)]=(n+1)\big(\mathbb E u_{n0}^2+\sum_{m=1}^n(\mathbb E u_{nm}^2+\mathbb E v_{nm}^2)\big)=(n+1)(1+2n)\sigma_n^2$. The stream's output at a counter does not depend on any other draw (Proposition 8.6). $\square$
+
+*Caveat.* The prior is stationary and isotropic. The Moon's crust is neither: its anomalies cluster (about the South Pole–Aitken basin, at the swirls). The drawn part therefore says how much finer structure there is and of what spectrum, not where it is. Its provenance is *synthetic*, and every reading says so.
+
+**The solar wind.** The external part is the interplanetary field measured at L1 (SWPC's real-time magnetometer, one-minute values in GSE axes), carried ballistically to the Moon at the solar wind's speed. By Taylor's frozen-in hypothesis the field is advected unchanged: $B_{\text{ext}}(x,t)=B_{L1}\big(t-(x_{L1}-x_\parallel)/v\big)$, with $x_\parallel$ the Moon's place along the Sun–Earth line and $x_{L1}=1.5\times10^9$ m, a travel of about an hour. Inside the Earth's magnetotail, taken as a cylinder of 25 Earth radii on the night side, there is no solar wind and the part is left out, with the reason. *Caveat.* Ballistic propagation ignores the tilt of the field's phase fronts, which moves the arrival by minutes (Mailyan, Munteanu and Haaland 2008). The Moon's wake and the plasma's interaction with the strongest anomalies, whose fields stand off the solar wind above Reiner Gamma (Lue et al. 2011), are not modelled. The magnetotail's shape is a cylinder only to first order. This part's provenance is *physical*, the crust's is *assimilated*, and the reading lists the provenance of each.
 
 ## 9. Scenario, Evidence, Experiment and Run
 
@@ -482,6 +565,8 @@ Every result above that can be checked numerically is checked, by a program on c
 | 7.4 configuration variety | a four-bar linkage: one degree of freedom; its singular configurations found by the rank of $J$ | 2 |
 | 7.5 constrained dynamics | a pendulum as a constrained particle: the constraint kept to $10^{-12}$ over $10^5$ steps by projection; the energy's drift bounded | 2 |
 | 8.6 determinism of the readings | two sessions with one seed give the same GNSS solution at a tick, and a third with another seed another | S |
+| 8.12 the unresolved part | T2015_449's field at five mounts on and above the Moon against pyshtools to $10^{-7}$ of $\lvert B\rvert$; the finer scales a function of the seed; the spectral law recovered from a synthetic spectrum exactly, and from a random field within four standard errors (physis `check_analysis`) | S |
+| 8.9 the envelope | every reading names its measurement, interval, frame, support, snapshot and interaction; a reading outside its coverage is *outside*; a compass in the blackout zone is *invalid*, with its reason; a declared family without a model is refused | S |
 | 8.8 no starvation | aging lets a low job run beside a full stream at the predicted instant; a constant bandwidth server gives a stream at most $Uh+Q$, and without it the stream makes the hard tasks miss (calx `check_realtime`) | S |
 | 8.4 causality | a controller's commands unchanged when readings not yet delivered are altered; a rejected trial leaves the memory as it was | 2 |
 | 10.1 the chain of worlds | a position carried through patch → Moon → barycentre and back, to $10^{-9}$ m | 2 |
@@ -513,6 +598,10 @@ Every result above that can be checked numerically is checked, by a program on c
 | $\mathsf F=(\mathsf H,m,\mathcal Q,C,\mathcal A)$ | an instrument family: kernel, model, quantities, cost, coverage | —, —, —, s, — | `InstrumentInfo`, `Kernel`, `Coverage` |
 | $(T_k,D_k,\chi_k)$, $r_J$, $d_J$ | a sensor's period, deadline and criticality; a job's release and absolute deadline | s, s, —; s, s | `SensorSpec`; calx `Job`, `PeriodicTask` |
 | $(Q,T)$ | a constant bandwidth server's budget and period | s, s | calx `ConstantBandwidthServer` |
+| $q$ | a reading's quality: valid, outside, missing, invalid | — | `Quality` |
+| $R_n$, $\hat R_n=A\,n^\beta\rho^{2n}$, $d$ | the Lowes–Mauersberger spectrum, its law, the sources' depth | T², T², m | physis `lowes_spectrum`, `SpectralLaw`, `SpectralLaw::depth` |
+| $\sigma_n^2$, $u_{nm}$ | the unresolved part's variance and coefficients | T² | physis `unresolved_spectrum`, `unresolved_part` |
+| $\mathsf V=\mathsf M\circ\rho\circ r$ | a visual expression: mark, reduction, restriction | — | the page's layers (`fields.js`) |
 | $\xi$, $\hat\vartheta$, $u_k$ | controller memory, estimates, commands | — | `Controller` |
 | $Q=V(I)$, $\Sigma$ | configuration variety, singular locus | — | `Mechanism` |
 | $\mathcal S$, $\mathcal E$ | scenario, experiment | — | `Scenario`, `Experiment` |
@@ -558,6 +647,15 @@ Every result above that can be checked numerically is checked, by a program on c
 - Kogut, J. B. (1979), An introduction to lattice gauge theory and spin systems, *Reviews of Modern Physics* 51, 659–713.
 - Lindley, D. V. (1956), On a measure of the information provided by an experiment, *Annals of Mathematical Statistics* 27, 986–1005.
 - Liu, C. L. and Layland, J. W. (1973), Scheduling algorithms for multiprogramming in a hard-real-time environment, *Journal of the ACM* 20, 46–61.
+- Chulliat, A. et al. (2025), *The US/UK World Magnetic Model for 2025–2030: Technical Report*, NOAA National Centers for Environmental Information.
+- Davies, E. B. and Lewis, J. T. (1970), An operational approach to quantum probability, *Communications in Mathematical Physics* 17, 239–260.
+- Lowes, F. J. (1966), Mean-square values on sphere of spherical harmonic vector fields, *Journal of Geophysical Research* 71, 2179.
+- Lue, C., Futaana, Y., Barabash, S., Wieser, M., Holmström, M., Bhardwaj, A., Dhanya, M. B. and Wurz, P. (2011), Strong influence of lunar crustal fields on the solar wind flow, *Geophysical Research Letters* 38, L03202.
+- Mailyan, B., Munteanu, C. and Haaland, S. (2008), What is the best method to calculate the solar wind propagation delay?, *Annales Geophysicae* 26, 2383–2394.
+- Ozawa, M. (1984), Quantum measuring processes of continuous observables, *Journal of Mathematical Physics* 25, 79–87.
+- Tsunakawa, H., Takahashi, F., Shimizu, H., Shibuya, H. and Matsushima, M. (2015), Surface vector mapping of magnetic anomalies over the Moon using Kaguya and Lunar Prospector observations, *Journal of Geophysical Research: Planets* 120, 1160–1185.
+- Voorhies, C. V., Sabaka, T. J. and Purucker, M. (2002), On magnetic spectra of Earth and Mars, *Journal of Geophysical Research* 107, 5034.
+- Wieczorek, M. A. (2018), Strength, depth, and geometry of magnetic sources in the crust of the Moon from localized power spectrum analysis, *Journal of Geophysical Research: Planets* 123, 291–316; the expansion T2015_449, Zenodo, doi:10.5281/zenodo.3873648 (CC BY 4.0).
 - Planck Collaboration (2020), Planck 2018 results. I. Overview and the cosmological legacy of Planck, *Astronomy and Astrophysics* 641, A1.
 - Rots, A. H. (2007), Space-Time Coordinate Metadata for the Virtual Observatory, version 1.33, IVOA Recommendation.
 - Salmon, J. K., Moraes, M. A., Dror, R. O. and Shaw, D. E. (2011), Parallel random numbers: as easy as 1, 2, 3, *Proceedings of SC11*, 16:1–16:12.

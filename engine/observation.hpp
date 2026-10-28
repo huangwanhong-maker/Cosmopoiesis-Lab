@@ -14,6 +14,12 @@
 // joining observations and a model), synthetic (made up, with the right statistics). The page
 // colours them apart, so that a simulated value is never mistaken for a measured one.
 //
+// Each kernel is an abstract class (PointProbe, Footprint, LineOfSight, Ranging, Counter,
+// EventDetector, Proprioceptive, ClockReading, Protocol, QuantumMeasurement, Estimator, Feed), from
+// which an implemented family derives: the kernel supplies the measurement's support (a point, a
+// column, a cone, the paths to emitters …) and its identity, the family its model. A family that is
+// only declared (declared.hpp: the encyclopedia's, bound to its kernel) has no class of its own.
+//
 // All instruments measuring at one instant read one Snapshot of the world at it, which computes
 // what they share once (the Sun's place, a constellation's states) and never changes: their
 // readings depend on the instant, the mount and the noise's key alone, never on the order in which
@@ -111,6 +117,8 @@ struct InstrumentInfo {
   std::string model;        // what computes it
   std::string about;
   std::string references;
+  std::string frame = "";   // the frame of its vector values ("local north, east, down at the mount", "GCRS")
+  std::string interaction = "passive";  // passive, active (it emits), contact or destructive (it takes a sample)
 };
 
 // ---- where and when ---------------------------------------------------------------------------------
@@ -124,6 +132,7 @@ struct MountState {
   Vec3 fixed{0, 0, 0};                   // in the body's fixed frame, m
   std::string fixed_frame;
   Vec3 gcrs{0, 0, 0}, icrs{0, 0, 0};     // m
+  Json settings = Json::object();        // the sensor's own settings (its family's, as SensorSpec gives them)
 };
 
 struct Availability {
@@ -225,20 +234,130 @@ inline std::uint32_t key_of(std::string_view s) {
 
 // ---- the interface of an instrument -------------------------------------------------------------------
 
+// Why a reading has no value, in the observation envelope's terms: the quantity is not defined
+// there by the instrument's model (outside its coverage), the data it needs are missing, or it was
+// computed and is not to be trusted (invalid: a compass in a blackout zone).
+enum class Quality { valid, outside, missing, invalid };
+
+inline const char* name(Quality q) {
+  switch (q) {
+    case Quality::valid: return "valid";
+    case Quality::outside: return "outside";
+    case Quality::missing: return "missing";
+    case Quality::invalid: return "invalid";
+  }
+  return "?";
+}
+
 class Unavailable : public std::runtime_error {
  public:
-  using std::runtime_error::runtime_error;
+  explicit Unavailable(const std::string& why, Quality q = Quality::outside) : std::runtime_error(why), quality_(q) {}
+  Quality quality() const { return quality_; }
+ private:
+  Quality quality_;
 };
 
 class Instrument {
  public:
   virtual ~Instrument() = default;
   virtual const InstrumentInfo& info() const = 0;
+  // Its kernel, which the kernel class gives; the registry holds it equal to info().kernel.
+  virtual Kernel kernel() const = 0;
   // Where and when it can read, given what the world has loaded.
   virtual Coverage coverage(const World& w) const = 0;
+  // The measurement's support in space and time (the envelope's): what the reading integrates over.
+  virtual Json support(const MountState& m) const = 0;
   // Its values at the snapshot from the mount, by quantity name (numbers, or arrays for vectors and
-  // profiles); Unavailable when it cannot read there (with the reason).
+  // profiles); Unavailable when it cannot read there (with the reason and the quality).
   virtual Json measure(const Snapshot& s, const MountState& m, Noise& noise) const = 0;
+};
+
+// ---- the kernels as classes ---------------------------------------------------------------------------
+//
+// A family derives from the class of its kernel and gives its model in measure(); the kernel gives
+// the support. Kernels with no implemented family yet (counter, event detector, protocol, quantum
+// measurement, estimator, feed) are here so that one can be written against them; declared.hpp
+// names the families that wait for them.
+
+namespace kernel_detail {
+inline Json at_mount(const char* kind, const MountState& m, Json extra = Json::object()) {
+  extra.set("kind", kind);
+  extra.set("at", m.address);
+  return extra;
+}
+}  // namespace kernel_detail
+
+// y = φ(x(t)) + ε: a field's value at the mount.
+class PointProbe : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::point_probe; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("point", m); }
+};
+// y = ∫_D w φ dμ + ε: a field integrated over a region about the mount (a column, a pixel's footprint).
+class Footprint : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::footprint; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("region", m); }
+};
+// The radiance into an aperture from a cone of directions.
+class LineOfSight : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::line_of_sight; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("cone", m); }
+};
+// Ranges and delays along paths between the mount and emitters.
+class Ranging : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::ranging; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("paths", m); }
+};
+// N ~ Poisson(∫ A ε Φ dt): a counting measure over a window.
+class Counter : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::counter; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("window", m); }
+};
+// An event when a guard g(state) = 0 is crossed.
+class EventDetector : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::event_detector; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("guard", m); }
+};
+// y = h(q, q̇, a) of the agent's own state.
+class Proprioceptive : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::proprioceptive; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("own state", m); }
+};
+// c(t) = t + b + d (t − t₀) + ε: a clock's reading.
+class ClockReading : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::clock; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("instant", m); }
+};
+// A hybrid automaton of stages (sample, prepare, measure) with latencies, ending in a result.
+class Protocol : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::protocol; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("sample", m); }
+};
+// P(y) = tr(ρ M_y): an outcome drawn by the Born rule.
+class QuantumMeasurement : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::quantum; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("state", m); }
+};
+// ŷ from other readings and a model: its readings are assimilated whatever its inputs were.
+class Estimator : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::estimator; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("readings", m); }
+};
+// Readings delivered by another system; only their timing and coverage are modelled (the server's).
+class Feed : public Instrument {
+ public:
+  Kernel kernel() const final { return Kernel::feed; }
+  Json support(const MountState& m) const override { return kernel_detail::at_mount("delivered", m); }
 };
 
 }  // namespace cosmopoiesis

@@ -29,7 +29,7 @@
 
 namespace cosmopoiesis {
 
-class PointMassGravimeter final : public Instrument {
+class PointMassGravimeter final : public PointProbe {
  public:
   PointMassGravimeter() {
     info_ = {"gravimeter.body", "Gravimeter", "E03", Kernel::point_probe, Provenance::model,
@@ -87,7 +87,7 @@ inline std::pair<double, bool> height_above_sea_level(const World& w, const Moun
   return {m.geodetic.height - w.geoid->undulation(m.geodetic.latitude, m.geodetic.longitude), true};
 }
 
-class AtmosphereProbe final : public Instrument {
+class AtmosphereProbe final : public PointProbe {
  public:
   AtmosphereProbe() {
     info_ = {"atmosphere.ussa1976", "Barometer and thermometer (standard atmosphere)", "D01", Kernel::point_probe, Provenance::model,
@@ -119,7 +119,7 @@ class AtmosphereProbe final : public Instrument {
   InstrumentInfo info_;
 };
 
-class Radiosonde final : public Instrument {
+class Radiosonde final : public Footprint {
  public:
   Radiosonde() {
     info_ = {"radiosonde.ussa1976", "Radiosonde column (standard atmosphere)", "D01", Kernel::footprint, Provenance::model,
@@ -164,7 +164,7 @@ inline double tt_of_date(const World& w, int year, int month = 1, int day = 1) {
   return t.tt.minus({2451545.0, 0.0}) * mt::DAY;
 }
 
-class Magnetometer final : public Instrument {
+class Magnetometer final : public PointProbe {
  public:
   Magnetometer() {
     info_ = {"magnetometer.wmm2025", "Magnetometer (WMM2025)", "C01", Kernel::point_probe, Provenance::model,
@@ -223,9 +223,63 @@ class Magnetometer final : public Instrument {
   InstrumentInfo info_;
 };
 
+// A magnetic compass near the ground (the encyclopedia's A03): the bearing of the horizontal field,
+// from WMM2025. It reads where a compass is used, on the Earth from 1 km below the ellipsoid (a mine)
+// to 30 km above it (a balloon), and refuses where its needle does not settle: where the horizontal
+// field is below 2000 nT, WMM's blackout zone about each magnetic pole, it answers why (invalid); below
+// 6000 nT, the caution zone, it reads and says so (the WMM2025 report, §1.8). An ideal compass: no
+// deviation of a vehicle's own field, no needle's friction.
+class MagneticCompass final : public PointProbe {
+ public:
+  MagneticCompass() {
+    info_ = {"compass.magnetic", "Magnetic compass (WMM2025)", "A03", Kernel::point_probe, Provenance::model,
+             {{"magnetic_north_deg", "deg", "the needle's bearing from true north, the declination D, east positive"},
+              {"dip_deg", "deg", "the inclination I, positive down"}, {"horizontal_T", "T", "H, which turns the needle"},
+              {"zone", "", "reliable, or caution where H < 6000 nT"}, {"grid_variation_deg", "deg", "GV, poleward of 55°"}},
+             6e-5, 1, "the World Magnetic Model 2025 (NOAA NCEI and BGS), geophysics::geomagnetism",
+             "a compass on or near the ground: the direction of the horizontal field, refused in the blackout zones about the magnetic poles",
+             "Chulliat et al. 2025, The US/UK World Magnetic Model for 2025–2030, NOAA NCEI, §1.8 (the blackout and caution zones)",
+             "the local horizon at the mount (true north)"};
+  }
+  const InstrumentInfo& info() const override { return info_; }
+  Coverage coverage(const World& w) const override {
+    Coverage c;
+    c.bodies = {"earth"};
+    c.height_min = geophysics::geomagnetism::LOWEST_HEIGHT_M;
+    c.height_max = 30e3;
+    const auto model = Magnetometer::coefficients(w);
+    if (model) {
+      c.tt_from = tt_of_date(w, int(std::floor(model->valid_from_year())));
+      c.tt_to = tt_of_date(w, int(std::floor(model->valid_until_year())));
+    }
+    c.about = "near the Earth's ground, from 1 km below the ellipsoid to 30 km above it, within WMM2025's lifetime";
+    return c;
+  }
+  Json measure(const Snapshot& s, const MountState& m, Noise&) const override {
+    namespace gm = geophysics::geomagnetism;
+    const auto model = Magnetometer::coefficients(s.world());
+    if (!model) throw Unavailable("the World Magnetic Model is not in the cache (python data/acquisition/fetch.py noaa-wmm)", Quality::missing);
+    if (!s.instant().has_utc) throw Unavailable("the model's time is a calendar year (UTC)");
+    const gm::Field f = gm::field(*model, m.fixed, gm::decimal_year(s.instant().utc));
+    const auto& e = f.elements;
+    const double deg = 180 / std::numbers::pi;
+    if (e.horizontal_T < gm::BLACKOUT_HORIZONTAL_T)
+      throw Unavailable("the horizontal field is " + std::to_string(int(std::lround(e.horizontal_T * 1e9))) +
+                            " nT, below the 2000 nT of WMM's blackout zone about the magnetic pole: a compass needle does not settle here",
+                        Quality::invalid);
+    Json j = Json::object({{"magnetic_north_deg", e.declination_rad * deg}, {"dip_deg", e.inclination_rad * deg}, {"horizontal_T", e.horizontal_T},
+                           {"zone", e.horizontal_T < gm::CAUTION_HORIZONTAL_T ? "caution" : "reliable"}});
+    if (std::isfinite(e.grid_variation_rad)) j.set("grid_variation_deg", e.grid_variation_rad * deg);
+    return j;
+  }
+ private:
+  InstrumentInfo info_;
+};
+
 inline void add_environment_instruments(Registry& r) {
   r.add(std::make_unique<PointMassGravimeter>());
   r.add(std::make_unique<Magnetometer>());
+  r.add(std::make_unique<MagneticCompass>());
   r.add(std::make_unique<AtmosphereProbe>());
   r.add(std::make_unique<Radiosonde>());
 }

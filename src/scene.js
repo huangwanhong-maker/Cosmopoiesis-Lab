@@ -46,6 +46,7 @@ export class Scene {
     this.terrainReady = terrainReady;
     this.options = {
       exaggeration: 1, surface: 'visible', synthetic: false, provenance: false, atmosphere: true, milkyWay: true, orbits: true,
+      fieldLines: false, moonField: null, moonFieldSynthetic: false, moonFieldOpacity: 0.8,
       base: { earth: 'eox-s2cloudless-2016', moon: 'trek-lro-wac' }, night: true,
       data: null, dataOpacity: 0.75, reference: null, referenceOpacity: 0.9, date: null,
     };
@@ -109,7 +110,8 @@ export class Scene {
       }
       const layers = ids.filter((id) => id && IMAGERY[id] && IMAGERY[id].body === body.key)
         .map((id) => imageryLayer(this.layerKey(id), IMAGERY[id], { date: () => (IMAGERY[id].daily ? o.date || undefined : undefined) }));
-      if (body.key === 'moon' && o.base.moon === 'map' && body.map) return [mapLayer('map-moon', body.map)];
+      if (body.key === 'moon' && o.base.moon === 'map' && body.map) layers.splice(0, layers.length, mapLayer('map-moon', body.map));
+      if (body.key === 'moon' && o.moonField && this.moonFieldMap) layers.push(this.moonFieldMap.layer);
       return layers;
     }
     return body.map ? [mapLayer(`map-${body.key}`, body.map)] : [];
@@ -126,6 +128,11 @@ export class Scene {
   setLayers() {
     for (const b of Object.values(this.bodies)) b.tree.setLayers(this.layersFor(b));
     this.onChange();
+  }
+  // The Moon's crustal field, laid over its ground as its data layer (fields.js), or null.
+  setMoonField(map) {
+    this.moonFieldMap = map;
+    this.setLayers();
   }
   rebuildTerrain() {
     for (const b of Object.values(this.bodies)) {
@@ -299,7 +306,8 @@ void main() {
       b.gpu.draw(selection, {
         bodyRelative: rel, rotation: R, sunBody: applyTransposed(R, sunDir),
         base: this.baseKey(b), night: key === 'earth' && o.night ? 'gibs-blackmarble' : null,
-        data: key === 'earth' && o.data ? { layer: this.layerKey(o.data), opacity: o.dataOpacity } : null,
+        data: key === 'earth' && o.data ? { layer: this.layerKey(o.data), opacity: o.dataOpacity }
+          : key === 'moon' && o.moonField && this.moonFieldMap ? { layer: this.moonFieldMap.id, opacity: o.moonFieldOpacity } : null,
         reference: key === 'earth' && o.reference ? { layer: this.layerKey(o.reference), opacity: o.referenceOpacity } : null,
         overlay: o.provenance && b.terrain ? 1 : 0, exposure: key === 'moon' ? 1.05 : 1,
         sunView: [sunView.x, sunView.y, sunView.z], atmosphere: o.atmosphere,
@@ -347,7 +355,8 @@ void main() {
     return kind === 'inertial' ? { position: B.position, rotation: I } : B;
   }
 
-  // A path (a line through points), points, or a mark, in a frame (frameOf); null removes it.
+  // A path (a line through points), lines (segments, their ends in pairs), points, or a mark, in a frame
+  // (frameOf); null removes it.
   // hideBelow: not drawn when the camera is nearer than this to a body's ground (m); group: an option
   // that hides the feature when false (as 'orbits').
   setFeature(key, frame, points, { kind = 'path', colour = 0xe889b8, size = 7, opacity = 1, depthTest = null, hideBelow = 0, group = null } = {}) {
@@ -360,8 +369,9 @@ void main() {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
     let object;
-    if (kind === 'path') {
-      object = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: colour, transparent: true, opacity, depthTest: depthTest ?? false }));
+    if (kind === 'path' || kind === 'lines') {
+      const material = new THREE.LineBasicMaterial({ color: colour, transparent: true, opacity, depthTest: depthTest ?? false });
+      object = kind === 'path' ? new THREE.Line(geometry, material) : new THREE.LineSegments(geometry, material);
     } else {
       object = new THREE.Points(geometry, new THREE.PointsMaterial({ color: colour, size: kind === 'mark' ? size + 4 : size, sizeAttenuation: false,
         map: this.disc(), transparent: true, alphaTest: 0.2, depthTest: kind !== 'mark', opacity }));

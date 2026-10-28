@@ -6,7 +6,7 @@
 // observer (azimuth, elevation and range; east, north and up; north, east and down). The grammar
 // is the engine's own.
 
-import { engine, acquire } from '../api.js';
+import { engine } from '../api.js';
 import { esc, fmt, length, ttText, latText, lonText } from '../format.js';
 
 const DEG = 180 / Math.PI;
@@ -36,7 +36,7 @@ export function navPage(app) {
       el.addEventListener('click', (e) => {
         const a = e.target.closest('.address[data-text]') || (e.target.id === 'nav-view' ? e.target : null);
         if (a) app.putAddress(a.dataset.text || a.textContent);
-        if (e.target.id === 'nav-set-observer' && app.picked) setObserver(app.picked.canonical);
+        if (e.target.id === 'nav-set-observer' && app.picked) app.setObserver(app.picked.canonical || app.picked.address);
         if (e.target.id === 'nav-go-observer' && app.observer) app.goTo(app.observer);
         if (e.target.id === 'nav-grammar-toggle') {
           grammarShown = !grammarShown;
@@ -90,16 +90,6 @@ export function navPage(app) {
       el.querySelector('#nav-observer-place').textContent = p ? `${p.body === 'earth' ? 'On the Earth' : `On ${p.body}`}: ${latText(p.latitude_deg, 4)}, ${lonText(p.longitude_deg, 4)}, ${fmt(p.height_m, 1)} m` : '';
     },
   };
-
-  async function setObserver(text) {
-    try {
-      const a = await acquire({ observer: text });
-      app.adoptAcquisition(a);
-      app.console.message('advisory', `The observer is now at ${text}`, 'nav');
-    } catch (error) {
-      app.console.message('caution', `The observer was not moved: ${error.message}`, 'nav');
-    }
-  }
 
   async function grammar() {
     const box = el.querySelector('#nav-grammar');

@@ -89,8 +89,11 @@ CLOCK = runtime.MissionClock()
 RECIPE = None
 WRITES = {"allowed": True, "token": None}
 LIMITS = {"bytes": 256 * 1024, "samples": 4000, "positions": 10000, "seconds": 60.0, "max_level": {"earth": 18, "moon": 14}}
-OPS = {"status", "time", "frames", "ephemeris", "bodies", "transform", "holonomy", "convert", "address", "geodesic", "satellites", "instruments"}
+OPS = {"status", "time", "frames", "ephemeris", "bodies", "transform", "holonomy", "convert", "address", "geodesic", "satellites", "instruments",
+       "field_lines", "field_map"}
 SATELLITES = CACHE / "celestrak-gp"
+# The Moon's field maps, which take the engine seconds and do not change: the last few kept.
+FIELD_MAPS: dict[str, dict] = {}
 ACQUISITION = runtime.Acquisition(engine, CLOCK, TERRAIN, SATELLITES, address_engine=ENGINE)
 TILE = re.compile(r"^/tiles/terrain/(earth|moon)/(\d+)/(\d+)/(\d+)$")
 # Terrain tiles are built a few at a time, so that a page asking for many does not starve the rest.
@@ -129,6 +132,13 @@ def engine_refusal(body: dict) -> str | None:
             return "ephemeris: span and step are numbers of seconds"
         if not step >= 1 or span / step + 1 > LIMITS["samples"]:
             return f"{op}: at most {LIMITS['samples']} samples, a step of at least 1 s"
+    if op == "field_map":
+        try:
+            step, degree = float(body.get("step_deg", 1.0)), int(body.get("synthetic_degree", 720))
+        except (TypeError, ValueError):
+            return "field_map: step_deg and synthetic_degree are numbers"
+        if not 0.5 <= step <= 5 or not 450 <= degree <= 720:
+            return "field_map: a step of 0.5° to 5°, finer scales to degree 720 at most"
     if op == "transform" and len(body.get("positions") or []) > LIMITS["positions"]:
         return f"transform: at most {LIMITS['positions']} positions"
     if op == "satellites":
@@ -233,6 +243,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body["files"] = [{"path": str(SATELLITES / g / "gp.tle"), "group": g} for g in body.pop("groups")]
             if body["op"] == "address":
                 body["now_unix"] = time.time()
+            if body["op"] == "field_map":
+                key = json.dumps(body, sort_keys=True)
+                if key not in FIELD_MAPS:
+                    answer = ENGINE.ask(body, timeout=LIMITS["seconds"])
+                    if "error" in answer:
+                        return self.reply_json(answer, 422)
+                    while len(FIELD_MAPS) >= 6:
+                        FIELD_MAPS.pop(next(iter(FIELD_MAPS)))
+                    FIELD_MAPS[key] = answer
+                return self.reply_json(FIELD_MAPS[key], 200)
             answer = ENGINE.ask(body, timeout=LIMITS["seconds"])
             return self.reply_json(answer, 200 if "error" not in answer else 422)
         self.send_error(404)

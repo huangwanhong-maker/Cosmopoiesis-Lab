@@ -49,6 +49,16 @@ inline constexpr double SUN_RADIUS_M = 6.957e8;
 // What the world has loaded for its instruments: the spacetime, the geoid, the satellites' element
 // sets by group, and the present (the wall's now, in TT seconds from J2000.0), for the coverage of
 // physical instruments.
+// What physical sources tell the virtual instruments (the server passes them with a step): the
+// interplanetary field at L1 in GSE axes, minute by minute (TT seconds from J2000.0 and tesla), and the
+// solar wind's bulk speed. Written by the session before it dispatches, read by the instruments only.
+struct SolarWindInputs {
+  std::vector<std::array<double, 4>> imf_gse;  // tt_s, Bx, By, Bz, ascending in time
+  double speed_m_s = 0;
+  double speed_tt_s = 0;
+  std::string spacecraft;
+};
+
 class World {
  public:
   explicit World(Spacetime& s) : s_(s) {}
@@ -58,8 +68,9 @@ class World {
   std::map<std::string, std::vector<navigation::orbits::Tle>> elements;  // by group
   double now_tt = 0;
   std::uint64_t seed = 20261028;
-  // Extensions the environment's models attach (environment.hpp), by name.
+  // Extensions the environment's models attach (environment.hpp, lunar.hpp), by name.
   std::map<std::string, std::shared_ptr<const void>> models;
+  SolarWindInputs solar_wind;
  private:
   Spacetime& s_;
 };
@@ -95,7 +106,7 @@ inline double above_horizon(double a, double e) {
 
 // ---- clock.scales ----------------------------------------------------------------------------------
 
-class ClockInstrument final : public Instrument {
+class ClockInstrument final : public ClockReading {
  public:
   ClockInstrument() {
     info_ = {"clock.scales", "Time scales", "A01", Kernel::clock, Provenance::model,
@@ -134,7 +145,7 @@ class ClockInstrument final : public Instrument {
 
 // ---- position.truth ---------------------------------------------------------------------------------
 
-class PositionInstrument final : public Instrument {
+class PositionInstrument final : public Proprioceptive {
  public:
   PositionInstrument() {
     info_ = {"position.truth", "Position (truth)", "J06", Kernel::proprioceptive, Provenance::model,
@@ -160,7 +171,7 @@ class PositionInstrument final : public Instrument {
 
 // ---- sun.sensor -------------------------------------------------------------------------------------
 
-class SunSensor final : public Instrument {
+class SunSensor final : public LineOfSight {
  public:
   SunSensor() {
     info_ = {"sun.sensor", "Sun sensor and radiometer", "C10", Kernel::line_of_sight, Provenance::model,
@@ -228,7 +239,7 @@ class SunSensor final : public Instrument {
 
 // ---- sky.bodies -------------------------------------------------------------------------------------
 
-class SkyInstrument final : public Instrument {
+class SkyInstrument final : public LineOfSight {
  public:
   SkyInstrument() {
     info_ = {"sky.bodies", "The bodies in the sky", "F07", Kernel::line_of_sight, Provenance::model,
@@ -266,7 +277,7 @@ struct ConstellationState {
   std::vector<Satellite> satellites;
 };
 
-class GnssReceiver final : public Instrument {
+class GnssReceiver final : public Ranging {
  public:
   explicit GnssReceiver(double sigma_uere_m = 3.0, double mask_deg = 10.0) : sigma_(sigma_uere_m), mask_(mask_deg * std::numbers::pi / 180) {
     info_ = {"gnss.receiver", "GNSS receiver (simulated)", "A02", Kernel::ranging, Provenance::model,

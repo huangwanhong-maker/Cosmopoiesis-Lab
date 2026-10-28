@@ -8,7 +8,10 @@ process of the engine (engine.Engine, as the server holds it), configured, stepp
 and asked to describe itself and to simulate its policies. The physics of each instrument is the
 domains' to check (geodesy's normal gravity, geophysics' WMM, meteorology's standard atmosphere);
 these checks hold the plumbing: the instants, the counts of releases and skips, the units, the
-determinism of a session's noise, coverage refused with a reason.
+determinism of a session's noise, coverage refused with a reason, the envelope of every reading, the
+families declared but not written, and the kernel's report. The Moon's magnetometer is held, through
+the engine, to pyshtools on T2015_449 (the planetary-science domain's tests/fixtures/lunar-field.txt),
+and its solar-wind part to a field given as the server gives it.
 """
 
 from __future__ import annotations
@@ -217,5 +220,112 @@ try:
                      "burst": {"at_s": 0.5, "count": 2000, "cost_s": 0.002, "criticality": 2}}, timeout=60)
     worst = max((p["misses"] for p in burst.get("policies", [])), default=0)
     check("analyse: a burst of 2000 events of 2 ms makes some policy miss deadlines", worst > 0, worst)
+
+    # ---- the envelope and the kernel --------------------------------------------------------------------
+    r = readings.get("grav", {})
+    check("envelope: a reading names its measurement, interval, frame, support, snapshot and interaction, and is valid",
+          r.get("measurement") == f"grav@{TT:.0f}" or str(r.get("measurement", "")).startswith("grav@")
+          and all(k in r for k in ("interval", "frame", "support", "snapshot", "interaction")) and r.get("quality") == "valid",
+          {k: r.get(k) for k in ("measurement", "frame", "support", "quality")})
+    check("envelope: a reading refused by coverage is of quality 'outside'", readings.get("moon.mag", {}).get("quality") == "outside",
+          readings.get("moon.mag", {}).get("quality"))
+    k = cfg.get("kernel", {})
+    check("kernel: the session reports the kernel's real-time classes, and why one is refused",
+          k.get("system") and isinstance(k.get("fifo_permitted"), bool) and isinstance(k.get("deadline_permitted"), bool)
+          and k.get("workers_class") and (k["fifo_permitted"] or bool(k.get("refusal"))), {x: k.get(x) for x in ("system", "fifo_permitted", "workers_class")})
+    bad = eng.ask({"op": "acquire.configure", "session": "declared", "sensors": [{"id": "radar", "family": "declared.C06", "mount": "observer"}],
+                   "observer": OBSERVER}, timeout=60)
+    check("declared: a family of the encyclopedia without a model is refused, and says so",
+          "declared, not implemented" in bad.get("error", ""), bad.get("error"))
+    ins = eng.ask({"op": "instruments"}, timeout=60)
+    declared = ins.get("declared", [])
+    classes = {x.get("class") for x in ins.get("kernels", [])}
+    check("declared: the encyclopedia's 101 families, each bound to one of the twelve kernel classes",
+          len(declared) == 101 and len(classes) == 12 and all(d.get("class") in classes for d in declared),
+          [d["code"] for d in declared if d.get("class") not in classes])
+
+    # ---- the compass and the Moon's magnetometer ---------------------------------------------------------
+    fixtures = {}
+    for line in (ROOT / "domains" / "planetary-science" / "tests" / "fixtures" / "lunar-field.txt").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            name, lat, lon, h, n, e, d = line.split()
+            fixtures[name] = (float(lat), float(lon), float(h), float(n), float(e), float(d))
+    lunar_sensors = [{"id": f"moon.{name}", "family": "magnetometer.moon", "period_s": 1,
+                      "mount": f"moon({abs(lat)} {'N' if lat >= 0 else 'S'}, {abs(lon)} {'E' if lon >= 0 else 'W'}, {h:.0f} m)"}
+                     for name, (lat, lon, h, *_) in fixtures.items()]
+    field_sensors = lunar_sensors + [
+        {"id": "compass", "family": "compass.magnetic", "mount": OBSERVER, "period_s": 1},
+        {"id": "mag", "family": "magnetometer.wmm2025", "mount": OBSERVER, "period_s": 1},
+        {"id": "compass.pole", "family": "compass.magnetic", "mount": "earth(85.9 N, 139.0 E, 10 m)", "period_s": 1},
+        {"id": "compass.high", "family": "compass.magnetic", "mount": "earth(51.4769 N, 0.0005 W, 40 km)", "period_s": 1},
+        {"id": "compass.moon", "family": "compass.magnetic", "mount": "moon(0.674 N, 23.473 E)", "period_s": 1},
+        {"id": "moon.on_earth", "family": "magnetometer.moon", "mount": OBSERVER, "period_s": 1},
+        {"id": "moon.fine", "family": "magnetometer.moon", "mount": "moon(7.5 N, 59 W)", "period_s": 1, "settings": {"synthetic": True}},
+        {"id": "moon.low", "family": "magnetometer.moon", "mount": "moon(7.5 N, 59 W, -2 km)", "period_s": 1},
+    ]
+
+    def fields(session: str, seed: int, inputs: dict | None = None) -> dict:
+        c = eng.ask({"op": "acquire.configure", "session": session, "sensors": field_sensors, "observer": OBSERVER, "seed": seed}, timeout=120)
+        if "error" in c:
+            return {"error": c["error"]}
+        now = time.time()
+        a = eng.ask({"op": "acquire.step", "session": session, "clock": {"tt_s": TT, "wall": now, "rate": 1, "running": False},
+                     "wall": now, "interval_s": 0.25, **({"inputs": inputs} if inputs else {})}, timeout=120)
+        return {x["sensor"]: x for x in a.get("readings", [])} if "error" not in a else {"error": a["error"]}
+
+    got = fields("fields", 7)
+    check("fields: a session of compasses and lunar magnetometers steps", "error" not in got, got.get("error"))
+    c, m = got.get("compass", {}), got.get("mag", {})
+    check("compass: at Greenwich it reads WMM's declination and inclination, reliable",
+          c.get("available") and abs(c["values"]["magnetic_north_deg"] - m["values"]["declination_deg"]) < 1e-9
+          and abs(c["values"]["dip_deg"] - m["values"]["inclination_deg"]) < 1e-9 and c["values"]["zone"] == "reliable",
+          c.get("values"))
+    c = got.get("compass.pole", {})
+    check("compass: in the blackout about the magnetic pole (H < 2000 nT) it does not settle: invalid, with the reason",
+          c.get("available") is False and c.get("quality") == "invalid" and "2000 nT" in c.get("reason", ""), c.get("reason"))
+    check("compass: above 30 km, and on the Moon, it is outside its coverage",
+          all(got.get(x, {}).get("available") is False and got.get(x, {}).get("quality") == "outside" for x in ("compass.high", "compass.moon")),
+          [got.get(x, {}).get("reason") for x in ("compass.high", "compass.moon")])
+    check("lunar magnetometer: on the Earth it is outside its coverage", got.get("moon.on_earth", {}).get("quality") == "outside")
+    worst = 0.0
+    for name, (lat, lon, h, n, e, d) in fixtures.items():
+        v = got.get(f"moon.{name}", {}).get("values", {})
+        b = math.sqrt(n * n + e * e + d * d)
+        worst = max(worst, max(abs(v.get("north_T", 1) - n), abs(v.get("east_T", 1) - e), abs(v.get("down_T", 1) - d)) / b)
+    check("lunar magnetometer: T2015_449's crustal field as pyshtools gives it, at five mounts on and above the Moon (to 1e-7 of |B|)",
+          worst < 1e-7, f"{worst:.2e}")
+    low, rg = got.get("moon.low", {}).get("values", {}), fixtures["reiner_gamma"]
+    check("lunar magnetometer: 2 km below the sphere (low ground) it reads the model at the sphere, and says so",
+          abs(low.get("crustal_T", 0) - math.sqrt(sum(x * x for x in rg[3:]))) < 1e-15 and abs(low.get("below_sphere_m", 0) - 2000) < 1e-3 and bool(low.get("note")),
+          {k: low.get(k) for k in ("crustal_T", "below_sphere_m")})
+    fine = got.get("moon.fine", {}).get("values", {})
+    check("lunar magnetometer: with finer scales, the power below the spectral law to degree 720, said to be synthetic",
+          fine.get("small_scales_degree") == 720 and fine.get("small_scales_T", 0) > 0 and fine.get("provenance_of_parts", {}).get("small_scales") == "synthetic",
+          fine.get("small_scales_T"))
+    again = fields("fields.again", 7).get("moon.fine", {}).get("values", {})
+    other = fields("fields.other", 8).get("moon.fine", {}).get("values", {})
+    check("lunar magnetometer: the finer scales are a function of the session's seed",
+          again.get("small_scales_T") == fine.get("small_scales_T") and other.get("small_scales_T") != fine.get("small_scales_T"))
+
+    # The solar wind's field, as the server passes it: 5 nT along the Sun's direction (GSE x), at
+    # 400 km/s, minute by minute over the six hours before the instant.
+    tt0 = TT - 6 * 3600
+    wind = {"solar_wind": {"imf_gse": [[tt0 + 60 * i, 5e-9, 0.0, 0.0] for i in range(361)], "speed_m_s": 4e5, "speed_tt_s": TT, "spacecraft": "test"}}
+    v = fields("fields.wind", 7, wind).get("moon.tranquility", {}).get("values", {})
+    if v.get("in_magnetotail"):
+        check("lunar magnetometer: in the Earth's magnetotail the solar wind's field is not added, and it says so",
+              "external_T" not in v and bool(v.get("external_note")), v.get("external_note"))
+    else:
+        # The travel time is from L1 to the Moon's place along the Sun–Earth line: within the Moon's
+        # distance of the 1.5e9 m to L1, at 400 km/s.
+        check("lunar magnetometer: the solar wind's field measured at L1 one travel time before is added",
+              abs(v.get("external_T", 0) - 5e-9) < 1e-15 and abs(v.get("delay_s", 0) * 4e5 - 1.5e9) < 4.1e8
+              and v.get("provenance_of_parts", {}).get("external") == "physical",
+              {k: v.get(k) for k in ("external_T", "delay_s")})
+    crust = fixtures["tranquility"]
+    check("lunar magnetometer: the total is the crust and the solar wind's field together",
+          abs(math.sqrt(v.get("north_T", 0) ** 2 + v.get("east_T", 0) ** 2 + v.get("down_T", 0) ** 2) - v.get("total_T", -1)) < 1e-18
+          and (v.get("in_magnetotail") or abs(v.get("crustal_T", 0) - math.sqrt(sum(x * x for x in crust[3:]))) < 1e-15),
+          v.get("total_T"))
 finally:
     eng.close()

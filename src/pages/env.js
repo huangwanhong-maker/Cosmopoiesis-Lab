@@ -18,6 +18,8 @@ export function envPage(app) {
       el.innerHTML = `
         <h3>The observer <span class="aside" id="env-where"></span></h3>
         <div id="env-observer"></div>
+        <div class="row"><label class="switch"><input type="checkbox" id="env-follow" ${app.observerFollows ? 'checked' : ''}><span>Follows the point chosen <small>a click on any body moves the observer and its instruments there</small></span></label></div>
+        <div id="env-picked"></div>
         <h3>The air <span class="aside" id="env-air-prov"></span></h3>
         <div id="env-air"></div>
         <div class="charts-2"><div id="env-temperature"></div><div id="env-pressure"></div></div>
@@ -33,8 +35,20 @@ export function envPage(app) {
         <div id="env-nav"></div>
         <h3>Elsewhere <span class="aside">other mounts</span></h3>
         <div id="env-elsewhere"></div>`;
+      page.bind();
     },
     show() { page.render(true); },
+    bind() {
+      el.addEventListener('change', (e) => {
+        if (e.target.id !== 'env-follow') return;
+        app.setObserverFollows(e.target.checked);
+        if (e.target.checked && app.picked && app.picked.address !== app.observer) app.setObserver(app.picked.canonical || app.picked.address);
+        page.render(true);
+      });
+      el.addEventListener('click', (e) => {
+        if (e.target.id === 'env-observe-picked' && app.picked) app.setObserver(app.picked.canonical || app.picked.address);
+      });
+    },
     onReadings() { if (app.isShown('ENV')) page.render(false); },
     render(force) {
       const now = performance.now();
@@ -50,6 +64,10 @@ export function envPage(app) {
       const pos = v('observer.position'), place = r('observer.position')?.place;
       const terrain = r('terrain.probe');
       el.querySelector('#env-where').textContent = pos?.body ? `on ${pos.body}` : '';
+      // A point chosen elsewhere, when the observer does not follow it.
+      const picked = app.picked, chosen = picked?.canonical || picked?.address;
+      el.querySelector('#env-picked').innerHTML = !app.observerFollows && chosen && chosen !== app.observer
+        ? `<p class="note">The point chosen, <span class="address" data-text="${esc(chosen)}">${esc(chosen)}</span>, is not the observer. <button type="button" class="key small" id="env-observe-picked">Observe from it</button></p>` : '';
       el.querySelector('#env-observer').innerHTML = `<div class="address" data-text="${esc(app.observer)}">${esc(app.observer || '—')}</div>
         <table><tbody>
         ${place ? `<tr><th>Place</th><td class="num">${latText(place.latitude_deg, 5)}, ${lonText(place.longitude_deg, 5)}<small>${fmt(place.height_m, 1)} m above the figure</small></td></tr>` : ''}
@@ -89,22 +107,40 @@ export function envPage(app) {
         <tr><th>Gravity ${provenanceTag(g.provenance)}</th><td class="num">${fmt(g.values.gravity_m_s2, 6)} m/s²<small>${esc(g.values.model)}</small></td></tr>
         <tr><th>Its deflection</th><td class="num">${fmt(g.values.deflection_deg * 3600, 3)}″ from the figure's normal</td></tr></tbody></table>` : why(g) || '<p class="note">waiting for the gravimeter</p>';
 
-      // The magnetic field.
-      const m = r('observer.magnetometer');
-      el.querySelector('#env-field-prov').innerHTML = m ? provenanceTag(m.provenance) : '';
-      if (m?.available) {
+      // The magnetic field: the compass is an instrument of its own, reading only near the Earth's
+      // ground and outside the blackout zones; the magnetometers read wherever their models hold.
+      const m = r('observer.magnetometer'), compass = r('observer.compass'), lunar = r('observer.moon_magnetometer');
+      el.querySelector('#env-field-prov').innerHTML = m?.available ? provenanceTag(m.provenance) : lunar?.available ? provenanceTag(lunar.provenance) : '';
+      if (compass?.available) {
+        const c = compass.values;
+        compassRose(el.querySelector('#env-compass'), { declination: c.magnetic_north_deg, inclination: c.dip_deg, zone: c.zone });
+      } else {
+        el.querySelector('#env-compass').innerHTML = compass ? `<p class="note">The compass ${compass.quality === 'invalid' ? 'does not settle' : 'does not read here'}: ${esc(compass.reason || '')}</p>`
+          : '<p class="note">waiting for the compass</p>';
+      }
+      if (lunar?.available) {
+        const f = lunar.values, nT = 1e9;
+        el.querySelector('#env-field').innerHTML = `<table><tbody>
+          <tr><th>F</th><td class="num">${fmt(f.total_T * nT, 2)} nT<small>the crust's ${fmt(f.crustal_T * nT, 2)} nT (T2015_449, to degree 449)</small></td></tr>
+          ${f.small_scales_T !== undefined ? `<tr><th>Finer scales</th><td class="num">${fmt(f.small_scales_T * nT, 2)} nT<small>synthetic: the power the model lacks below the crust's spectral law, to degree ${f.small_scales_degree}</small></td></tr>` : ''}
+          <tr><th>N, E, D</th><td class="num">${fmt(f.north_T * nT, 2)}, ${fmt(f.east_T * nT, 2)}, ${fmt(f.down_T * nT, 2)} nT</td></tr>
+          <tr><th>The solar wind's</th><td class="num">${f.external_T !== undefined ? `${fmt(f.external_T * nT, 2)} nT<small>measured at L1 by ${esc(f.external_spacecraft || 'SWPC')} ${duration(f.delay_s)} before</small>` : `<small>${esc(f.external_note || 'not included')}</small>`}</td></tr>
+          <tr><th>Its sources</th><td>${Object.entries(f.provenance_of_parts || {}).map(([k, p]) => `${esc(k.replace('_', ' '))} <small>${esc(p)}</small>`).join(', ')}</td></tr></tbody></table>
+          ${f.note ? `<p class="note">${esc(f.note)}.</p>` : ''}
+          <p class="note">The Moon has no global field: what a magnetometer there reads is the remanence of its crust and the field the solar wind carries past it.</p>`;
+      } else if (m?.available) {
         const f = m.values, nT = 1e9;
-        compassRose(el.querySelector('#env-compass'), { declination: f.declination_deg, inclination: f.inclination_deg, zone: f.zone });
         el.querySelector('#env-field').innerHTML = `<table><tbody>
           <tr><th>F</th><td class="num">${fmt(f.total_T * nT, 0)} nT</td></tr>
           <tr><th>H, Z</th><td class="num">${fmt(f.horizontal_T * nT, 0)}, ${fmt(f.down_T * nT, 0)} nT</td></tr>
           <tr><th>D</th><td class="num">${fmt(f.declination_deg, 2)}° ± ${fmt(f.declination_uncertainty_deg, 2)}°</td></tr>
           <tr><th>I</th><td class="num">${fmt(f.inclination_deg, 2)}°</td></tr>
-          <tr><th>Compass</th><td><span class="status ${f.zone === 'reliable' ? 'good' : f.zone === 'caution' ? 'warning' : 'critical'}">${esc(f.zone)}</span></td></tr>
+          <tr><th>A compass</th><td><span class="status ${f.zone === 'reliable' ? 'good' : f.zone === 'caution' ? 'warning' : 'critical'}">${esc(f.zone)}</span></td></tr>
           <tr><th>Dipole</th><td class="num">λₘ ${fmt(f.geomagnetic_latitude_deg, 1)}°, L ${fmt(f.l_shell, 2)}</td></tr></tbody></table>`;
       } else {
-        el.querySelector('#env-compass').innerHTML = '';
-        el.querySelector('#env-field').innerHTML = m ? `<p class="note">${esc(m.reason || '')}</p>` : '<p class="note">waiting for the magnetometer</p>';
+        // Neither magnetometer reads here: say why each does not.
+        const reasons = [m, lunar].filter(Boolean).map((x) => `<p class="note">${esc(x.title || x.family)}: ${esc(x.reason || '')}</p>`);
+        el.querySelector('#env-field').innerHTML = reasons.join('') || '<p class="note">waiting for the magnetometers</p>';
       }
 
       // The sky: the bodies and the GNSS satellites.
@@ -158,8 +194,11 @@ export function envPage(app) {
       const iss = r('iss.sun'), issPos = r('iss.position'), issMag = r('iss.magnetometer');
       const tq = r('tranquility.sun'), tqSky = v('tranquility.sky'), tqG = r('tranquility.gravity');
       const earthThere = tqSky?.bodies?.find((b) => b.body === 'earth');
+      const tqB = r('tranquility.magnetometer'), rg = r('reiner_gamma.magnetometer'), rg30 = r('reiner_gamma.30km');
+      const lunarRow = (x, name, place) => (x?.available ? `<tr><th>${name}<small>${place}</small></th><td class="num">F ${fmt(x.values.total_T * 1e9, 2)} nT${provenanceTag(x.provenance)}<small>the crust ${fmt(x.values.crustal_T * 1e9, 2)} nT${x.values.small_scales_T !== undefined ? `, finer scales ${fmt(x.values.small_scales_T * 1e9, 2)} nT (synthetic)` : ''}${x.values.external_T !== undefined ? `, the solar wind ${fmt(x.values.external_T * 1e9, 2)} nT` : x.values.in_magnetotail ? ', in the Earth\'s magnetotail' : ''}</small></td></tr>` : '');
       el.querySelector('#env-elsewhere').innerHTML = `<table><tbody>
         ${iss?.available ? `<tr><th>The ISS</th><td class="num">${iss.values.disc_visible > 0.999 ? 'in sunlight' : iss.values.disc_visible < 0.001 ? 'in the Earth\'s shadow' : `${fmt(iss.values.disc_visible * 100, 0)}% of the Sun`}${issPos?.available ? `<small>${fmt(issPos.values.height_m / 1e3, 1)} km up</small>` : ''}${issMag?.available ? `<small>F ${fmt(issMag.values.total_T * 1e9, 0)} nT, L ${fmt(issMag.values.l_shell, 2)}</small>` : ''}</td></tr>` : ''}
+        ${lunarRow(tqB, 'Magnetometer', 'Tranquility Base')}${lunarRow(rg, 'Magnetometer', 'Reiner Gamma, with finer scales')}${lunarRow(rg30, 'Magnetometer', '30 km over Reiner Gamma')}
         ${tq?.available ? `<tr><th>Tranquility Base<small>the Moon</small></th><td class="num">the Sun at ${fmt(tq.values.elevation_deg, 1)}°${earthThere ? `<small>the Earth at az ${fmt(earthThere.azimuth_deg, 1)}°, el ${fmt(earthThere.elevation_deg, 1)}°</small>` : ''}${tqG?.available ? `<small>g ${fmt(tqG.values.gravity_m_s2, 4)} m/s²</small>` : ''}</td></tr>` : ''}
         </tbody></table>`;
     },

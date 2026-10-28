@@ -39,6 +39,24 @@
       "done": "data/cache/iana-leap-seconds/latest/leap-seconds.list"
     },
     {
+      "id": "noaa-wmm",
+      "title": "The World Magnetic Model 2025 (NOAA NCEI and BGS): the magnetometer and the compass on the Earth, and its field lines",
+      "run": [
+        "data/acquisition/fetch.py",
+        "noaa-wmm"
+      ],
+      "done": "data/cache/noaa-wmm/WMM.COF"
+    },
+    {
+      "id": "moon-magnetic-t2015",
+      "title": "The Moon's crustal field, T2015_449 (Wieczorek 2018, from Tsunakawa et al. 2015): the magnetometer on the Moon and its map",
+      "run": [
+        "data/acquisition/fetch.py",
+        "moon-magnetic-t2015"
+      ],
+      "done": "data/cache/moon-magnetic-t2015/T2015_449.sh"
+    },
+    {
       "id": "engine",
       "title": "The engine of spacetime, compiled with g++",
       "run": [

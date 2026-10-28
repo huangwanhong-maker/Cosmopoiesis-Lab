@@ -53,6 +53,7 @@ SOURCES = {
     "leap_seconds": CACHE / "iana-leap-seconds" / "latest" / "leap-seconds.list",
     "geoid": CACHE / "products" / "geoid" / "egm96-15.pgm",
     "wmm": CACHE / "noaa-wmm" / "WMM.COF",
+    "moon_magnetic": CACHE / "moon-magnetic-t2015" / "T2015_449.sh",
 }
 
 
@@ -60,7 +61,7 @@ def include_dirs() -> list[Path]:
     """The include directories of the engine: the domains it stands on, physis, morphe and calx, the API's C++ and
     the engine's own."""
     dirs: list[Path] = []
-    for domain in ("metrology", "geodesy", "astronomy", "geophysics", "meteorology", "navigation"):
+    for domain in ("metrology", "geodesy", "astronomy", "geophysics", "meteorology", "navigation", "planetary-science"):
         dirs += sorted(p for p in ROOT.glob(f"domains/{domain}/*/include") if p.is_dir())
     for pattern in ("foundations/physis/*/include", "foundations/morphe/*/include", "foundations/calx/numerics/*/include",
                     "foundations/calx/compute/*/include"):

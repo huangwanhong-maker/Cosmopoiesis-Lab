@@ -49,9 +49,11 @@
 #include <thread>
 #include <vector>
 
+#include <calx/scheduler/kernel.hpp>
 #include <calx/scheduler/realtime.hpp>
 #include <calx/scheduler/thread_pool.hpp>
 
+#include "declared.hpp"
 #include "instruments.hpp"
 
 namespace cosmopoiesis {
@@ -62,7 +64,10 @@ namespace cs = calx::scheduler;
 
 class Registry {
  public:
-  void add(std::unique_ptr<Instrument> i) { list_.push_back(std::move(i)); }
+  void add(std::unique_ptr<Instrument> i) {
+    if (i->kernel() != i->info().kernel) throw std::logic_error("the family " + i->info().family + " declares another kernel than its class's");
+    list_.push_back(std::move(i));
+  }
   const Instrument* find(const std::string& family) const {
     for (const auto& i : list_)
       if (i->info().family == family) return i.get();
@@ -105,6 +110,7 @@ struct SensorSpec {
   int criticality = 1;       // 0 display, 1 science, 2 mission, 3 safety
   std::string server;        // a class's bandwidth server, or ""
   Coverage coverage;         // for an external sensor, as the server declares
+  Json settings = Json::object();  // the family's own settings (a lunar magnetometer's synthetic small scales)
 
   static SensorSpec from(const Json& j) {
     SensorSpec s;
@@ -122,6 +128,7 @@ struct SensorSpec {
     if (j["cost_s"].is_number()) s.cost_s = j["cost_s"].as_number();
     if (j["criticality"].is_number()) s.criticality = std::clamp(int(j["criticality"].as_number()), 0, 3);
     s.server = j["server"].text();
+    if (j["settings"].is_object()) s.settings = j["settings"];
     if (s.id.empty() || s.family.empty()) throw std::invalid_argument("a sensor needs an id and a family");
     if (!(s.period_s >= 0)) throw std::invalid_argument("a sensor's period is not negative");
     const Json& c = j["coverage"];
@@ -147,6 +154,7 @@ struct PolicySpec {
   double aging_step_s = 0.05;   // fixed priority with aging: a level for each step waited
   double budget = 0.6;          // the fraction of a step's wall interval given to internal jobs
   double target = 0.8;          // the utilisation (per worker) above which periods are compressed
+  std::string kernel = "probe"; // "probe": report the kernel's real-time classes; "fifo": raise the workers to SCHED_FIFO where permitted
 };
 
 // ---- the session ------------------------------------------------------------------------------------------
@@ -154,7 +162,7 @@ struct PolicySpec {
 class Session {
  public:
   Session(World& w, const Registry& r, std::size_t workers)
-      : world_(w), registry_(r), pool_(std::max<std::size_t>(1, workers)) {}
+      : world_(w), registry_(r), pool_(std::max<std::size_t>(1, workers)), kernel_(cs::probe_kernel()) {}
 
   std::size_t workers() const { return pool_.size(); }
 
@@ -164,7 +172,7 @@ class Session {
       std::vector<SensorSpec> next;
       for (std::size_t i = 0; i < r["sensors"].size(); i++) next.push_back(SensorSpec::from(r["sensors"][i]));
       for (const auto& s : next)
-        if (!s.external && !registry_.find(s.family)) throw std::invalid_argument("no instrument family " + s.family);
+        if (!s.external && !registry_.find(s.family)) throw std::invalid_argument(unknown_family(s.family));
       std::map<std::string, State> kept;
       for (const auto& s : next) {
         auto it = state_.find(s.id);
@@ -177,7 +185,7 @@ class Session {
     if (r["sensors_add"].is_array())
       for (std::size_t i = 0; i < r["sensors_add"].size(); i++) {
         const SensorSpec s = SensorSpec::from(r["sensors_add"][i]);
-        if (!s.external && !registry_.find(s.family)) throw std::invalid_argument("no instrument family " + s.family);
+        if (!s.external && !registry_.find(s.family)) throw std::invalid_argument(unknown_family(s.family));
         auto it = std::find_if(sensors_.begin(), sensors_.end(), [&](const SensorSpec& x) { return x.id == s.id; });
         if (it != sensors_.end()) *it = s; else sensors_.push_back(s);
         state_[s.id];
@@ -206,6 +214,12 @@ class Session {
       if (p["aging_step_s"].is_number()) policy_.aging_step_s = p["aging_step_s"].as_number();
       if (p["budget"].is_number()) policy_.budget = std::clamp(p["budget"].as_number(), 0.05, 1.0);
       if (p["target"].is_number()) policy_.target = std::clamp(p["target"].as_number(), 0.05, 1.0);
+      if (p["kernel"].is_string()) {
+        const std::string k = p["kernel"].text();
+        if (k != "probe" && k != "fifo") throw std::invalid_argument("the policy's kernel is probe or fifo");
+        policy_.kernel = k;
+      }
+      apply_kernel();
     }
     if (r["observer"].is_string() || r["observer"].is_null()) {
       observer_ = r["observer"].is_string() ? r["observer"].text() : "";
@@ -224,7 +238,7 @@ class Session {
                              {"mount", s.mount}, {"clock", s.clock}, {"period_s", s.period_s}, {"deadline_s", deadline_of(s)}, {"cost_s", cost_of(s)},
                              {"criticality", s.criticality}, {"criticality_name", criticality_name(s.criticality)}, {"server", s.server},
                              {"kernel", in ? kernel_info(in->info().kernel).key : s.kernel}, {"provenance", in ? name(in->info().provenance) : s.provenance},
-                             {"coverage", (in ? in->coverage(world_) : s.coverage).json()}});
+                             {"coverage", (in ? in->coverage(world_) : s.coverage).json()}, {"settings", s.settings}});
       if (st != state_.end()) {
         j.set("released", double(st->second.released));
         j.set("skipped", double(st->second.skipped));
@@ -238,8 +252,8 @@ class Session {
     for (const auto& s : servers_) servers.push(Json::object({{"name", s.name}, {"budget_s", s.budget_s}, {"period_s", s.period_s}, {"bandwidth", s.budget_s / s.period_s}}));
     return Json::object({{"sensors", sensors}, {"servers", servers}, {"observer", observer_}, {"workers", double(pool_.size())},
                          {"policy", Json::object({{"order", cs::policy_name(policy_.order)}, {"aging", policy_.aging}, {"aging_step_s", policy_.aging_step_s},
-                                                  {"budget", policy_.budget}, {"target", policy_.target}})},
-                         {"seed", double(world_.seed)}});
+                                                  {"budget", policy_.budget}, {"target", policy_.target}, {"kernel", policy_.kernel}})},
+                         {"kernel", kernel_json()}, {"seed", double(world_.seed)}});
   }
 
   // One step (see the header). Request: {"clock": {"tt_s", "wall", "rate", "running"}, "wall": now,
@@ -258,6 +272,21 @@ class Session {
       return (running && rate != 0) ? wall0 + (tt - tt0) / rate : wall;
     };
     Json readings = Json::array(), plan = Json::array(), trace = Json::array();
+
+    // 0. What physical sources tell the virtual instruments (the solar wind at L1), before dispatch.
+    if (r["inputs"].is_object() && r["inputs"]["solar_wind"].is_object()) {
+      const Json& sw = r["inputs"]["solar_wind"];
+      SolarWindInputs in;
+      for (std::size_t i = 0; i < sw["imf_gse"].size(); i++) {
+        const Json& row = sw["imf_gse"][i];
+        in.imf_gse.push_back({row[0].as_number(), row[1].as_number(), row[2].as_number(), row[3].as_number()});
+      }
+      std::sort(in.imf_gse.begin(), in.imf_gse.end(), [](const auto& a, const auto& b) { return a[0] < b[0]; });
+      in.speed_m_s = sw["speed_m_s"].is_number() ? sw["speed_m_s"].as_number() : 0.0;
+      in.speed_tt_s = sw["speed_tt_s"].is_number() ? sw["speed_tt_s"].as_number() : 0.0;
+      in.spacecraft = sw["spacecraft"].text();
+      world_.solar_wind = std::move(in);
+    }
 
     // 1. External readings and events.
     if (r["external"].is_array())
@@ -594,6 +623,7 @@ class Session {
   // The mount of a sensor at an instant.
   MountState mount_at(const SensorSpec& s, const mt::Instant& t) const {
     MountState m;
+    m.settings = s.settings;
     const std::string text = s.mount == "observer" ? observer_ : s.mount;
     if (text.empty()) return m;
     const auto& c = world_.catalogue();
@@ -643,9 +673,13 @@ class Session {
   Json measure(const SensorSpec& s, const Pending& p, const Snapshot& snap) const {
     const Instrument* in = registry_.find(s.family);
     const auto& info = in->info();
+    // The observation envelope: which measurement, over what interval and support, in what frame, of
+    // what quality, from which snapshot (decision 0005; formalism §8.5).
     Json x = Json::object({{"sensor", s.id}, {"family", s.family}, {"title", s.title.empty() ? info.title : s.title},
                            {"kernel", kernel_info(info.kernel).key}, {"provenance", name(info.provenance)}, {"tick", double(p.tick)},
-                           {"tt_s", p.tt}, {"criticality", s.criticality}});
+                           {"tt_s", p.tt}, {"criticality", s.criticality}, {"measurement", s.id + "@" + std::to_string(p.tick)},
+                           {"interval", Json::object({{"from_tt_s", p.tt}, {"to_tt_s", p.tt}})}, {"frame", info.frame},
+                           {"interaction", info.interaction}, {"snapshot", std::to_string(key_of(std::to_string(p.tt)))}});
     try {
       if (snap.instant().has_utc) x.set("time_utc", mt::format_iso(snap.instant().utc, mt::Scale::UTC, world_.spacetime().scales(), 3));
       const MountState m = mount_at(s, snap.instant());
@@ -653,18 +687,26 @@ class Session {
       if (!m.body.empty())
         x.set("place", Json::object({{"latitude_deg", m.geodetic.latitude * 180 / std::numbers::pi}, {"longitude_deg", m.geodetic.longitude * 180 / std::numbers::pi},
                                      {"height_m", m.geodetic.height}}));
+      x.set("support", in->support(m));
       const Availability a = in->coverage(world_).check(m, p.tt, world_.now_tt);
       if (!a.ok) {
         x.set("available", false);
         x.set("reason", a.reason);
+        x.set("quality", name(Quality::outside));
         return x;
       }
       Noise noise(world_.seed, key_of(s.id), static_cast<std::uint32_t>(p.tick), 0);
       x.set("values", in->measure(snap, m, noise));
       x.set("available", true);
+      x.set("quality", name(Quality::valid));
+    } catch (const Unavailable& e) {
+      x.set("available", false);
+      x.set("reason", std::string(e.what()));
+      x.set("quality", name(e.quality()));
     } catch (const std::exception& e) {
       x.set("available", false);
       x.set("reason", std::string(e.what()));
+      x.set("quality", name(Quality::invalid));
     }
     Json units = Json::object();
     for (const auto& q : info.quantities) if (!q.unit.empty()) units.set(q.name, q.unit);
@@ -672,9 +714,36 @@ class Session {
     return x;
   }
 
+  // Why a family cannot be mounted: declared and not implemented (declared.hpp), or unknown.
+  static std::string unknown_family(const std::string& family) {
+    const std::string code = family.rfind("declared.", 0) == 0 ? family.substr(9) : family;
+    for (const auto& d : declared_families())
+      if (code == d.code) return std::string("the family ") + d.code + " (" + d.title + ") is declared, not implemented: " + d.state;
+    return "no instrument family " + family;
+  }
+
+  // Raise the workers to SCHED_FIFO where the policy asks and the kernel permits, and back otherwise.
+  void apply_kernel() {
+    const bool want = policy_.kernel == "fifo" && kernel_.fifo_permitted;
+    if (want == raised_) return;
+    const int priority = kernel_.fifo_min;
+    pool_.run([&](std::size_t) { if (want) cs::raise_to_fifo(priority); else cs::lower_to_time_sharing(); });
+    raised_ = want;
+  }
+  Json kernel_json() const {
+    std::string workers;
+    const_cast<cs::ThreadPool&>(pool_).run([&](std::size_t t) { if (t == pool_.size() - 1) workers = cs::current_class(); });
+    return Json::object({{"system", kernel_.system}, {"release", kernel_.release}, {"wsl", kernel_.wsl}, {"preempt_rt", kernel_.preempt_rt},
+                         {"fifo_permitted", kernel_.fifo_permitted}, {"deadline_permitted", kernel_.deadline_permitted},
+                         {"rtprio_limit", double(kernel_.rtprio_limit)}, {"refusal", kernel_.refusal}, {"about", kernel_.about},
+                         {"workers_class", workers}, {"raised", raised_}});
+  }
+
   World& world_;
   const Registry& registry_;
   cs::ThreadPool pool_;
+  cs::KernelReport kernel_;
+  bool raised_ = false;
   std::vector<SensorSpec> sensors_;
   std::map<std::string, State> state_;
   std::vector<ServerSpec> servers_;

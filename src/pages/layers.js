@@ -3,6 +3,7 @@
 import { globe } from '../../../../visualization/js/index.js';
 import { satelliteGroups } from '../api.js';
 import { esc } from '../format.js';
+import { fieldLegend } from '../fields.js';
 
 const { IMAGERY } = globe;
 
@@ -47,6 +48,15 @@ export function layersPage(app) {
           ${check('atmosphere', o.atmosphere, 'The atmosphere\'s glow')}</div>
         <p class="legend" id="prov-legend" ${o.provenance ? '' : 'hidden'}>
           <span><i class="swatch" style="background:rgb(250,168,56)"></i> filled by the source</span><span><i class="swatch" style="background:rgb(89,148,242)"></i> finer than the data</span><span><i class="swatch" style="background:rgb(158,92,199)"></i> synthetic</span></p>
+        <h3>Magnetic fields</h3>
+        <div class="choices">${check('field-lines', o.fieldLines, 'The Earth\'s field lines', 'WMM2025, the core\'s field; modelled')}</div>
+        <p class="note" id="field-lines-note" ${o.fieldLines ? '' : 'hidden'}></p>
+        <div class="choices">${radio('moon-field', '', !o.moonField, 'The Moon\'s ground without its field')}
+          ${radio('moon-field', 'total', o.moonField === 'total', 'The Moon\'s crustal field, |B|', 'T2015_449, assimilated')}
+          ${radio('moon-field', 'radial', o.moonField === 'radial', 'Its radial component', 'outward and inward')}
+          ${check('moon-field-synthetic', o.moonFieldSynthetic, 'With scales finer than the data', 'synthetic: the power below the crust\'s spectral law, to degree 720')}</div>
+        <div class="row"><span>Opacity</span><input type="range" id="moon-field-opacity" min="0" max="1" step="0.05" value="${o.moonFieldOpacity}"></div>
+        <p class="legend" id="moon-field-legend" ${o.moonField ? '' : 'hidden'}></p>
         <h3>The sky</h3>
         <div class="choices">${check('milky-way', o.milkyWay, 'The Milky Way', 'Solar System Scope, in galactic coordinates')}
           ${check('orbits', o.orbits, 'The orbits', 'one period of each planet, DE440')}</div>
@@ -71,11 +81,18 @@ export function layersPage(app) {
         else if (t.id === 'atmosphere') o.atmosphere = t.checked;
         else if (t.id === 'milky-way') app.scene.setMilkyWay(t.checked);
         else if (t.id === 'orbits') { o.orbits = t.checked; app.touch(); }
+        else if (t.id === 'field-lines') lines(t.checked);
+        else if (t.name === 'moon-field' || t.id === 'moon-field-synthetic') {
+          moon(el.querySelector('input[name="moon-field"]:checked')?.value || null, el.querySelector('#moon-field-synthetic').checked);
+        }
         app.updateCredits();
         app.save();
         app.touch();
       });
-      el.addEventListener('input', (e) => { if (e.target.id === 'data-opacity') { o.dataOpacity = Number(e.target.value); app.touch(); } });
+      el.addEventListener('input', (e) => {
+        if (e.target.id === 'data-opacity') { o.dataOpacity = Number(e.target.value); app.touch(); }
+        if (e.target.id === 'moon-field-opacity') { o.moonFieldOpacity = Number(e.target.value); app.touch(); }
+      });
       el.querySelector('#sat-groups').addEventListener('change', () => {
         app.satellites.setGroups([...el.querySelectorAll('#sat-groups input:checked')].map((i) => i.dataset.group));
         app.save();
@@ -91,6 +108,29 @@ export function layersPage(app) {
       groups();
     },
   };
+  // The field layers are the engine's: the lines take half a second, the Moon's map some seconds.
+  async function lines(on) {
+    const note = el.querySelector('#field-lines-note');
+    note.hidden = !on;
+    if (!on) { await app.fields.setLines(false); return; }
+    note.textContent = 'tracing the field lines…';
+    try {
+      const l = await app.fields.setLines(true);
+      if (l) note.textContent = `${l.count} lines from 100 km above the ground at ±30°, ±50°, ±65° of latitude, traced by RK4 to the ground or six Earth radii, at ${l.year.toFixed(2)}. ${l.caveat}.`;
+    } catch (e) { note.textContent = `The engine did not trace them: ${e.message}`; }
+    app.updateCredits();
+  }
+  async function moon(quantity, synthetic) {
+    const legend = el.querySelector('#moon-field-legend');
+    legend.hidden = !quantity;
+    if (!quantity) { await app.fields.setMoon(null); app.updateCredits(); return; }
+    legend.innerHTML = `<span>computing the field on a half-degree grid${synthetic ? ', with its finer scales' : ''}…</span>`;
+    try {
+      const map = await app.fields.setMoon(quantity, synthetic);
+      if (map) legend.innerHTML = `${fieldLegend(map.legend)}<span><small>${esc(map.legend.provenance)}; the crust's spectrum R<sub>n</sub> ∝ n<sup>${map.legend.law.exponent.toFixed(2)}</sup> ρ<sup>2n</sup>, an effective depth of its sources of ${map.legend.law.depth_km.toFixed(1)} km</small></span>`;
+    } catch (e) { legend.innerHTML = `<span>The engine did not map it: ${esc(e.message)}</span>`; }
+    app.updateCredits();
+  }
   const titles = { stations: 'Space stations', visual: 'The brightest', 'gps-ops': 'GPS', galileo: 'Galileo', 'glo-ops': 'GLONASS', beidou: 'BeiDou', weather: 'Weather', science: 'Science' };
   async function groups() {
     const box = el.querySelector('#sat-groups');
