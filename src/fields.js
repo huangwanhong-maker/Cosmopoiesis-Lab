@@ -1,130 +1,208 @@
-// The magnetic fields drawn in the world: the Earth's field lines from WMM2025, and the Moon's crustal
-// field from T2015_449 (Tsunakawa et al. 2015, as Wieczorek expanded it), each the engine's (the ops
-// field_lines and field_map). A field is drawn as what it is (formalism §3.6): a vector field over
-// space as curves tangent to it, a scalar over a body's ground as a colour on that ground.
+// The fields of the world, drawn (decision 0007; formalism §3.6; the infrastructure's ADR 0053).
+//
+// The engine holds the world's fields (fields.hpp: physis's fields of the domains' models, each with its
+// descriptor) and reads them on samplings and along their integral curves. Each drawing is a visual
+// expression of the shared scene model (visualization/scene): a restriction, a reduction and a mark,
+// checked by the formalism's rules before it is drawn; the shared styles colour it, and the shared
+// renderers make its image, its segments and its three.js objects. What the world draws:
+//
+//   the Earth's field lines   earth.magnetic.core through 48 seeds, coloured by |B| along them;
+//   the Moon's crust          moon.magnetic.crust, or moon.magnetic with its unresolved scales, on its
+//                             ground: |B| or B_r, clear where the crust is weakly magnetised;
+//   a shell about the Earth   a field of the Earth on the sphere of 6371.2 km at a height: WMM2025's |B|
+//                             at 400 km shows the South Atlantic Anomaly, normal gravity its latitude.
 
+import * as THREE from 'three';
 import { engine } from './api.js';
 import { ttText } from './format.js';
+import { canvasOf, fieldMarks, renderers, scene } from '../../../visualization/js/index.js';
 
-// The colour of the crust's |B|: one hue, gold, from pale to deep, on a logarithmic scale from a
-// nanotesla to the map's greatest; its opacity rises with it from nothing, so that where the crust is
-// weakly magnetised (most of the Moon, a few nanotesla) the ground shows through and the anomalies
-// stand out. The radial component is diverging: gold outward, orchid inward, about a clear zero.
-const GOLD = [[0, [246, 227, 180]], [0.5, [233, 170, 64]], [1, [150, 82, 8]]];
-const ORCHID = [[0, [236, 222, 247]], [0.5, [184, 146, 221]], [1, [94, 58, 139]]];
-function ramp(stops, t) {
-  t = Math.min(1, Math.max(0, t));
-  for (let i = 1; i < stops.length; i++) {
-    const [t1, c1] = stops[i], [t0, c0] = stops[i - 1];
-    if (t <= t1) { const f = (t - t0) / (t1 - t0); return c0.map((x, k) => x + f * (c1[k] - x)); }
-  }
-  return stops[stops.length - 1][1];
-}
+const { express, float32Of, legendOf, quantityText, samplesOf, scalarOf, scaleOf, curvesOf } = scene;
+const { colouring, curveSegments, drapeImage } = renderers;
+
+const marks = fieldMarks(THREE);
+export const float32 = float32Of;
+
+// The floor of the Moon's map: a nanotesla, below which the crust's field is drawn clear.
 export const FIELD_FLOOR_T = 1e-9;
+// The reference spheres of the bodies' fields: T2015_449's of the Moon, WMM2025's of the Earth.
+const MOON_SPHERE_M = 1737.4e3, EARTH_SPHERE_M = 6371.2e3;
 
-// The engine's float32 values, sent as base64 (little-endian, as every browser's typed arrays are here).
-export function float32(text) {
-  const s = atob(text), bytes = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
-  return new Float32Array(bytes.buffer);
+// The world's fields, as the engine describes them, read once.
+let catalogue = null;
+export async function worldFields() {
+  if (!catalogue) catalogue = (await engine({ op: 'fields' })).fields;
+  return catalogue;
+}
+async function fieldNamed(name) {
+  const f = (await worldFields()).find((x) => x.name === name);
+  if (!f) throw new Error(`the world has no field ${name}`);
+  if (!f.available) throw new Error(f.missing);
+  return f;
 }
 
-// The ramps sampled at 256 steps, with the opacity that rises along them.
-const STEPS = 256;
-const table = (stops) => Array.from({ length: STEPS }, (_, k) => {
-  const t = k / (STEPS - 1), c = ramp(stops, t);
-  return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2]), Math.round(255 * 0.92 * Math.sqrt(t))];
-});
-const GOLD_TABLE = table(GOLD), ORCHID_TABLE = table(ORCHID);
-
-// The engine's grid as an equirectangular image, west at the left and north at the top.
-function imageOf(ans) {
-  const { nlat, nlon, quantity } = ans;
-  const values = ans.values || float32(ans.values_f32);
-  const top = Math.max(Math.abs(ans.min), Math.abs(ans.max));
-  const span = Math.log10(top / FIELD_FLOOR_T);
-  const canvas = document.createElement('canvas');
-  canvas.width = nlon;
-  canvas.height = nlat;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(nlon, nlat), px = img.data;
-  for (let i = 0; i < nlat * nlon; i++) {
-    const v = values[i];
-    const t = Math.log10(Math.max(Math.abs(v), FIELD_FLOOR_T) / FIELD_FLOOR_T) / span;
-    const c = (quantity === 'radial' && v < 0 ? ORCHID_TABLE : GOLD_TABLE)[Math.min(STEPS - 1, Math.max(0, Math.round(t * (STEPS - 1))))];
-    px[4 * i] = c[0], px[4 * i + 1] = c[1], px[4 * i + 2] = c[2], px[4 * i + 3] = c[3];
-  }
-  ctx.putImageData(img, 0, 0);
-  return { canvas, top };
+// The legend of a drawing as HTML: its bar between its end ticks, what it shows and on what scale.
+export function fieldLegend(legend) {
+  const ticks = legend.ticks;
+  const lo = ticks[0]?.label ?? '', hi = ticks[ticks.length - 1]?.label ?? '';
+  const floor = legend.scale?.floor ? quantityText(legend.scale.floor, legend.fibreUnit) : null;
+  const how = legend.scale?.kind === 'log' ? `logarithmic${floor ? `, clear below ${floor}` : ''}`
+    : legend.scale?.kind === 'diverging' ? `diverging about ${quantityText(legend.scale.centre, legend.fibreUnit)} at the middle${floor ? `, logarithmic in its size from ${floor} each way` : ''}` : 'linear';
+  const frame = legend.frame ? `, on ${legend.frame}'s axes` : '';
+  return `<span>${lo} <i class="ramp" style="background:${legend.map.gradient}"></i> ${hi}<small> ${legend.shows}${frame}, ${how}</small></span>`;
 }
 
-// The Moon's crustal field as a layer of the globe's tiles (the whole map, as the bodies' maps are:
-// its two halves the two tiles of level 0), with its title, credit and legend.
+// ---- the Moon's crust on its ground -----------------------------------------------------------------
+
+// The crust's field as a layer of the globe's tiles (the whole map, as the bodies' maps are: its two
+// halves the two tiles of level 0), with its title, credit and legend.
 export async function moonFieldMap({ quantity = 'total', synthetic = false, step_deg = 0.5, height_m = 0 } = {}) {
-  const ans = await engine({ op: 'field_map', body: 'moon', quantity, synthetic, step_deg, height_m, encoding: 'f32' });
-  const { canvas, top } = imageOf(ans);
+  const name = synthetic ? 'moon.magnetic' : 'moon.magnetic.crust';
+  const field = await fieldNamed(name);
+  const nlat = Math.round(180 / step_deg), nlon = 2 * nlat;
+  const radial = quantity === 'radial';
+  const sampling = { kind: 'sphere', centre: [0, 0, 0], radius_m: MOON_SPHERE_M + height_m, nlat, nlon };
+  const expression = express(field, sampling, radial
+    ? { reduction: { kind: 'radial' }, map: 'orchid-gold', floor: FIELD_FLOOR_T, opacity: 'rising' }
+    : { reduction: { kind: 'magnitude' }, map: 'gold', scale: 'log', floor: FIELD_FLOOR_T, opacity: 'rising' });
+  const answer = await engine({ op: 'field.sample', field: name, sampling, reduce: expression.reduction.kind, encoding: 'f32' });
+  const samples = samplesOf(answer);
+  const values = scalarOf(samples);
+  const top = answer.range ? Math.max(Math.abs(answer.range.min), Math.abs(answer.range.max)) : FIELD_FLOOR_T;
+  const scale = radial ? scaleOf(values, { kind: 'diverging', centre: 0, floor: FIELD_FLOOR_T }) : scaleOf(values, { kind: 'log', domain: [FIELD_FLOOR_T, top], floor: FIELD_FLOOR_T });
+  const canvas = canvasOf(drapeImage(values, answer.sampling, colouring(expression, scale, { alpha: 0.92 })));
   const id = `moon-field-${quantity}-${synthetic ? 'synthetic' : 'model'}-${step_deg}`;
-  const title = `The Moon's crustal field, ${quantity === 'radial' ? 'its radial component' : '|B|'} at the surface`;
-  const credit = `${ans.model}${synthetic ? `; synthetic, the power the model lacks below the crust's spectral law, to degree ${ans.degree}` : ''}`;
+  const title = `The Moon's crustal field, ${radial ? 'its radial component' : '|B|'} at the surface`;
+  const credit = synthetic ? `${field.source}` : field.source;
   const half = canvas.width / 2;
+  const legend = { ...legendOf(expression, scale, samples), quantity, top, floor: FIELD_FLOOR_T, field: field.name, law: field.law || null };
   return {
     id, title, credit,
     layer: {
       id, maxLevel: 0, service: { body: 'moon', title, credit, kind: 'map' },
       load: async (z, x) => (z === 0 ? createImageBitmap(canvas, x * half, 0, half, canvas.height, { imageOrientation: 'flipY' }) : null),
     },
-    legend: { quantity, top, floor: FIELD_FLOOR_T, min: ans.min, max: ans.max, provenance: ans.provenance, law: ans.law, degree: ans.degree },
+    legend,
   };
 }
 
-// The legend of the map, as HTML: the ramp and its ends.
-export function fieldLegend(legend) {
-  const stops = (s) => [0, 0.25, 0.5, 0.75, 1].map((t) => `rgb(${ramp(s, t).map(Math.round).join(',')}) ${t * 100}%`).join(', ');
-  const nT = (x) => `${(x * 1e9).toFixed(x >= 1e-9 ? 0 : 1)} nT`;
-  const bar = (s) => `<i class="ramp" style="background: linear-gradient(to right, ${stops(s)})"></i>`;
-  const inward = ORCHID.map(([t, c]) => [1 - t, c]).reverse();
-  return legend.quantity === 'radial'
-    ? `<span>inward ${nT(legend.top)} ${bar(inward)} 0 ${bar(GOLD)} ${nT(legend.top)} outward<small> logarithmic in |B_r| from ${nT(legend.floor)}</small></span>`
-    : `<span>${nT(legend.floor)} ${bar(GOLD)} ${nT(legend.top)}<small> logarithmic, clear below ${nT(legend.floor)}</small></span>`;
+// ---- the Earth's field lines --------------------------------------------------------------------------
+
+// Seeds 100 km above WMM's reference sphere at ±30°, ±50° and ±65° of latitude, every 45° of longitude.
+function lineSeeds() {
+  const seeds = [], r0 = EARTH_SPHERE_M + 100e3;
+  for (const latd of [-65, -50, -30, 30, 50, 65]) for (let k = 0; k < 8; k++) {
+    const lat = (latd * Math.PI) / 180, lon = (k * Math.PI) / 4;
+    seeds.push([r0 * Math.cos(lat) * Math.cos(lon), r0 * Math.cos(lat) * Math.sin(lon), r0 * Math.sin(lat)]);
+  }
+  return seeds;
 }
 
-// The Earth's field lines at an instant (TT seconds), in the Earth's fixed frame (ITRS), as the
-// segments of a 'lines' feature.
+// The lines at an instant (TT seconds), in the Earth's fixed frame (ITRS), coloured by |B| along them on
+// a logarithmic scale: bright where the field is strong, near the ground, fading outward.
 export async function earthFieldLines(tt, { maxRadius = 6 } = {}) {
-  const ans = await engine({ op: 'field_lines', body: 'earth', time: ttText(tt), max_radius: maxRadius });
-  const segments = [];
-  for (const line of ans.lines) for (let i = 1; i < line.length; i++) segments.push(line[i - 1], line[i]);
-  return { segments, model: ans.model, caveat: ans.caveat, year: ans.decimal_year, count: ans.lines.length };
+  const field = await fieldNamed('earth.magnetic.core');
+  const restriction = { kind: 'curves', seeds: lineSeeds(), within: { inner_m: EARTH_SPHERE_M, outer_m: maxRadius * EARTH_SPHERE_M } };
+  const expression = express(field, restriction, { map: 'plum', scale: 'log' });
+  const answer = await engine({ op: 'field.curves', field: field.name, time: ttText(tt), seeds: restriction.seeds, within: restriction.within, encoding: 'f32' });
+  const curves = curvesOf(answer);
+  const all = Float32Array.from(curves.flatMap((c) => [...c.magnitude]));
+  const scale = scaleOf(all, { kind: 'log' });
+  const night = document.documentElement.dataset.theme !== 'day';
+  const seg = curveSegments(curves, colouring(expression, scale, { alpha: 0.85, range: night ? [0.3, 1] : [0, 0.75] }));
+  return {
+    object: marks.lines(seg.positions, seg.colours, { opacity: 0.9 }),
+    count: curves.filter((c) => c.seeded).length,
+    utc: answer.time?.utc || null,
+    model: field.title, caveat: field.base.about,
+    legend: legendOf(expression, scale),
+  };
 }
 
-// The two layers' state, shared by LAYERS and the loop: the lines are drawn again when the world's
-// instant moves by more than a month (the secular variation), the map when its quantity changes.
+// ---- a field on a sphere about the Earth -------------------------------------------------------------
+
+// The fields a shell about the Earth may show: every available field on the ITRS.
+export async function shellFields() {
+  return (await worldFields()).filter((f) => f.available && f.frame === 'ITRS');
+}
+
+// A field of the Earth on the sphere of WMM's reference radius raised by `height_m`, as a translucent
+// shell: a vector's magnitude or radial part, a scalar as it is.
+export async function earthShell(name, { height_m = 400e3, reduction = 'magnitude', tt = 0, step_deg = 1, opacity = 0.7 } = {}) {
+  const field = await fieldNamed(name);
+  const vector = field.fibre.kind === 'vector';
+  const nlat = Math.round(180 / step_deg), nlon = 2 * nlat;
+  const sampling = { kind: 'sphere', centre: [0, 0, 0], radius_m: EARTH_SPHERE_M + height_m, nlat, nlon };
+  const kind = vector ? reduction : 'none';
+  const expression = express(field, sampling, { reduction: { kind }, map: kind === 'radial' ? 'lavender-rust' : 'plum' });
+  const request = { op: 'field.sample', field: name, sampling, reduce: kind, encoding: 'f32' };
+  if (field.time !== 'none') request.time = ttText(tt);
+  const answer = await engine(request);
+  const samples = samplesOf(answer);
+  const values = scalarOf(samples);
+  const scale = scaleOf(values, kind === 'radial' ? { kind: 'diverging', centre: 0 } : { kind: 'linear' });
+  if (!scale) throw new Error(`${field.title} has no value on that sphere: ${samples.reasons.map((r) => r.text).join('; ')}`);
+  // On a night ground the darkest part of a sequential map is left out, by day its palest (styles' within).
+  const night = document.documentElement.dataset.theme !== 'day';
+  const range = kind === 'radial' ? null : night ? [0.25, 1] : [0, 0.8];
+  const canvas = canvasOf(drapeImage(values, answer.sampling, colouring(expression, scale, { alpha: 1, range })));
+  return {
+    object: marks.sphereDrape(canvas, sampling.radius_m, { opacity }),
+    legend: legendOf(expression, scale, samples),
+    field, height_m, expression,
+  };
+}
+
+// ---- the layers' state ----------------------------------------------------------------------------------
+
+// The field layers' state, shared by LAYERS and the loop: the lines and a timed shell are drawn again when
+// the world's instant moves by more than a month (the secular variation), the map when its quantity changes.
 export class FieldLayers {
   constructor(app) {
     this.app = app;
     this.linesAt = null;
     this.lines = null;
     this.map = null;
+    this.shell = null;
+    this.shellAt = null;
     this.busy = false;
   }
 
   async setLines(on) {
     const { scene, clock } = this.app;
     scene.options.fieldLines = on;
-    if (!on) { scene.setFeature('field-lines', 'earth', null); this.linesAt = null; return null; }
+    if (!on) { scene.setObject('field-lines', null, null, null); this.linesAt = null; return null; }
     const tt = clock.now();
     const lines = await earthFieldLines(tt);
     if (!scene.options.fieldLines) return null;
-    scene.setFeature('field-lines', 'earth', lines.segments, { kind: 'lines', colour: 0x7fb0ee, opacity: 0.55, depthTest: true, group: 'fieldLines' });
+    scene.setObject('field-lines', 'earth', [0, 0, 0], lines.object, { group: 'fieldLines' });
     this.linesAt = tt;
     this.lines = lines;
     return lines;
   }
 
+  async setShell(spec) {
+    const { scene, clock } = this.app;
+    scene.options.fieldShell = spec || null;
+    if (!spec) { scene.setObject('field-shell', null, null, null); this.shell = null; this.shellAt = null; return null; }
+    const tt = clock.now();
+    const shell = await earthShell(spec.field, { ...spec, tt });
+    if (scene.options.fieldShell !== spec) return null;
+    scene.setObject('field-shell', 'earth', [0, 0, 0], shell.object, { group: 'fieldShell' });
+    this.shell = shell;
+    this.shellAt = shell.field.time !== 'none' ? tt : null;
+    return shell;
+  }
+
   tick(tt) {
-    if (!this.app.scene.options.fieldLines || this.linesAt === null || this.busy || Math.abs(tt - this.linesAt) < 30 * 86400) return;
+    if (this.busy) return;
+    const stale = (at) => at !== null && Math.abs(tt - at) >= 30 * 86400;
+    const lines = this.app.scene.options.fieldLines && stale(this.linesAt);
+    const shell = this.app.scene.options.fieldShell && stale(this.shellAt);
+    if (!lines && !shell) return;
     this.busy = true;
-    this.setLines(true).catch(() => {}).finally(() => { this.busy = false; });
+    Promise.all([lines ? this.setLines(true) : null, shell ? this.setShell(this.app.scene.options.fieldShell) : null])
+      .catch(() => {}).finally(() => { this.busy = false; });
   }
 
   async setMoon(quantity, synthetic) {

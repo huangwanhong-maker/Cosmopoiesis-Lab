@@ -221,6 +221,13 @@ input[type=range] { accent-color: var(--rose); }
 .mfd th, .mfd td { padding: 4px 4px; border-bottom: 1px solid var(--hair); vertical-align: top; text-align: left; }
 .mfd th { font-weight: 400; color: var(--ink-3); width: 38%; }
 .mfd td small, .mfd th small { display: block; }
+/* The world's fields (LAYERS): its name and provenance, what it is, and its fibre, representation and base;
+   one whose model is not loaded, dimmed, with the reason. */
+.mfd .catalogue .entry { padding: 5px 0; border-bottom: 1px solid var(--hair); color: var(--ink-2); }
+.mfd .catalogue .entry .name { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.mfd .catalogue .entry code { font-size: 11.5px; color: var(--ink); }
+.mfd .catalogue .entry small { display: block; }
+.mfd .catalogue .entry.off { opacity: 0.55; }
 .mfd p { margin: 6px 0; }
 .mfd .row { display: flex; align-items: center; gap: 8px; margin: 6px 0; flex-wrap: wrap; }
 .mfd .row > span:first-child { color: var(--ink-3); min-width: 76px; }
@@ -371,6 +378,8 @@ svg.chart .hit { fill: transparent; }
 .cube-view .scale-bar { position: absolute; right: 9px; bottom: 7px; font-size: 12px; color: var(--ink-3); pointer-events: none; }
 .cube-view .busy { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: linear-gradient(90deg, transparent, var(--rose), transparent); background-size: 40% 100%; background-repeat: no-repeat; animation: sweep 1.1s linear infinite; }
 @keyframes sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
+.rover-map { display: flex; justify-content: center; border: 1px solid var(--hair-2); background: var(--field); margin: 6px 0 2px; }
+.rover-map canvas { display: block; cursor: crosshair; }
 .cube-legend { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 8px; align-items: center; font-size: 12.5px; margin: 4px 0 2px; }
 .cube-legend .ramp { height: 11px; border: 1px solid var(--hair-2); }
 .cube-legend .lo, .cube-legend .hi { font-weight: 600; white-space: nowrap; }

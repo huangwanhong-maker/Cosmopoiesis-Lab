@@ -41,6 +41,7 @@ import { envPage } from './pages/env.js';
 import { busPage } from './pages/bus.js';
 import { instrPage } from './pages/instr.js';
 import { schedPage } from './pages/sched.js';
+import { roverPage } from './pages/rover.js';
 
 const { cartesian, geodetic, IMAGERY, loadStarProduct, apply, applyTransposed, localFrame } = globe;
 const $ = (s) => document.querySelector(s);
@@ -139,7 +140,8 @@ app.updateCredits = () => {
   if (focus === 'moon') list.push('Heights: LOLA (NASA GSFC, PDS); names: IAU WGPSN (USGS)');
   if (o.synthetic) list.push('Detail below the data\'s resolution is synthetic (violet in the provenance layer)');
   if (focus === 'moon' && o.moonField && app.fields?.map) list.push(`${app.fields.map.title}: ${app.fields.map.credit}`);
-  if (focus === 'earth' && o.fieldLines) list.push('Field lines: WMM2025 (NOAA NCEI, BGS), the core\'s field traced by the engine');
+  if (focus === 'earth' && o.fieldLines) list.push('Field lines: WMM2025 (NOAA NCEI, BGS), the core\'s field continued outward, traced by the engine');
+  if (focus === 'earth' && o.fieldShell && app.fields?.shell) list.push(`On a sphere about the Earth: ${app.fields.shell.field.title} (${app.fields.shell.field.source})`);
   list.push('Ephemeris: JPL DE440s; the Moon: DE440 (NAIF); the Earth: IERS; stars: HYG v4.1 (CC BY-SA 4.0); Milky Way: Solar System Scope (CC BY 4.0)');
   list.push('Space weather: NOAA SWPC; earthquakes: USGS; geomagnetism: WMM2025 (NOAA NCEI, BGS); satellites: CelesTrak');
   $('#credits').textContent = list[0] + (list.length > 1 ? ` · and ${list.length - 1} more (SYS)` : '');
@@ -721,11 +723,12 @@ async function main() {
   const LEFT = [['POINT', 'The point chosen: its place, from the observer, in every frame', 'science'], ['LAYERS', 'What is drawn', 'science'], ['TIME', 'The instant in its scales', 'both'],
     ['FRAMES', 'The catalogue of frames and its loops', 'engineering'], ['SYS', 'The engine, the data, the messages', 'engineering']];
   const RIGHT = [['ENV', 'The environment the observer\'s instruments read', 'science'], ['FIELD', 'The field about a point, as a cube filled with colour', 'science'], ['INSTR', 'The instruments, their readings first', 'both'],
+    ['ROVER', 'A rover surveying the Moon\'s field, and what its mission knows', 'science'],
     ['BUS', 'Every stream of readings, with its envelope', 'engineering'], ['SCHED', 'The acquisition\'s scheduling', 'engineering']];
   app.console.display('left', LEFT);
   app.console.display('right', RIGHT);
   app.pages = { POINT: pointPage(app), TIME: timePage(app), FRAMES: framesPage(app), LAYERS: layersPage(app), SYS: sysPage(app),
-    ENV: envPage(app), FIELD: fieldPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app) };
+    ENV: envPage(app), FIELD: fieldPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app), ROVER: roverPage(app) };
   for (const [k] of LEFT) app.console.register('left', k, app.pages[k]);
   for (const [k] of RIGHT) app.console.register('right', k, app.pages[k]);
   app.isShown = (k) => app.console.isShown(k);

@@ -628,6 +628,10 @@ class Acquisition:
         if "latitude_deg" in v:
             self.observer_place = {"latitude_deg": v["latitude_deg"], "longitude_deg": v["longitude_deg"], "height_m": v.get("height_m", 0), "body": body}
 
+    def seed(self) -> int | None:
+        """The seed of the session's synthetic draws, when one was configured."""
+        return (self.configured or {}).get("seed")
+
     def world_inputs(self) -> dict:
         """What the session's world holds beside the sources the server names: the satellites' element sets, the
         solar wind as the session was last told it, the present (TT seconds from J2000.0), the seed and the observer.

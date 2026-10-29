@@ -22,8 +22,10 @@
 // at the offset
 //   o = (((i + ½)/n − ½) a, ((j + ½)/n − ½) a, ((k + ½)/n − ½) a)   along east, north and up,
 // a the edge, so that the cell is at x = x₀ + Rᵀ o in the fixed frame; its index is i + n (j + n k),
-// east fastest (Fortran's order, as visualization/js/isosurface.js reads a volume). With n odd, the
-// middle cell's offset is exactly zero, and its reading is the family's at the centre itself.
+// east fastest (Fortran's order, as visualization/js/isosurface.js reads a volume). These are the cells
+// of physis's VolumeGrid about x₀ with the axes R, which field.sample reads a field on (fields.hpp): a
+// family's cube and a field's are on one grid. With n odd, the middle cell's offset is exactly zero,
+// and its reading is the family's at the centre itself.
 //
 // Each cell is a mount of its own: its place on the figure, whether it stands on the body (the rule of
 // mount_state), its places in the GCRS and the ICRS (one transform of the fixed frame at the instant),
@@ -62,6 +64,7 @@
 #include <vector>
 
 #include <calx/scheduler/thread_pool.hpp>
+#include <physis/fields/sampling.hpp>
 
 #include "acquisition.hpp"
 #include "instruments.hpp"
@@ -123,7 +126,8 @@ inline constexpr double PROBE_VOLUME_MIN_EDGE_M = 1.0, PROBE_VOLUME_MAX_EDGE_M =
 // ---- the request -----------------------------------------------------------------------------------------
 
 struct VolumeRequest {
-  std::string family;
+  std::string family;                   // an instrument family, or
+  std::string field;                    // a field of the world (fields.hpp), read on the same cells
   double edge_m = 0;                    // the cube's edge, m
   int n = 0;                            // cells along an edge
   std::vector<std::string> quantities;  // empty: every numeric scalar the readings carry
@@ -134,7 +138,9 @@ struct VolumeRequest {
   static VolumeRequest from(const Json& r) {
     VolumeRequest q;
     q.family = r["family"].text();
-    if (q.family.empty()) throw std::invalid_argument("probe_volume: name the instrument family, as \"magnetometer.wmm2025\"");
+    q.field = r["field"].text();
+    if (q.family.empty() == q.field.empty())
+      throw std::invalid_argument("probe_volume: name an instrument family, as \"magnetometer.wmm2025\", or a field of the world, as \"earth.magnetic\"");
     if (!r["n"].is_number() || r["n"].as_number() != std::floor(r["n"].as_number()) || r["n"].as_number() < PROBE_VOLUME_MIN_N ||
         r["n"].as_number() > PROBE_VOLUME_MAX_N)
       throw std::invalid_argument("probe_volume: n, the cells along an edge, is a whole number from " + std::to_string(PROBE_VOLUME_MIN_N) + " to " +
@@ -205,6 +211,31 @@ inline bool scalar(const Json& v) { return v.is_number(); }
 
 }  // namespace volume_detail
 
+// The figure of the body a cube stands on, and the cube's axes about its centre: the body's east, north
+// and up there (rows, in the fixed frame); or why there are none.
+inline std::pair<gf::Ellipsoid, Mat3> cube_axes(const World& w, const MountState& centre, const std::string& canonical) {
+  const auto b = centre.body.empty() ? std::nullopt : nf::body_frames(w.catalogue(), centre.body);
+  if (!b || !b->surface || !b->figure)
+    throw std::invalid_argument("the cube's axes are a body's east, north and up: its centre must be on or near a body with a surface, and " + canonical +
+                                " is in open space");
+  return {*b->figure, gf::Place::at(*b->figure, centre.geodetic).to_enu};
+}
+
+// The centre, the axes and the time of a cube's answer.
+inline Json cube_frame_json(const World& w, const MountState& centre, const std::string& canonical, const gf::Ellipsoid& figure, const Mat3& R,
+                            const mt::Instant& t, double tt) {
+  const auto& ts = w.spacetime().scales();
+  const Json rows = Json::array({Json::array({R[0][0], R[0][1], R[0][2]}), Json::array({R[1][0], R[1][1], R[1][2]}), Json::array({R[2][0], R[2][1], R[2][2]})});
+  return Json::object({{"time", Json::object({{"utc", t.has_utc ? Json(mt::format_iso(t.utc, mt::Scale::UTC, ts, 3)) : Json()}, {"tt_s", tt}})},
+                       {"centre", Json::object({{"address", canonical}, {"body", centre.body}, {"frame", centre.fixed_frame},
+                                                {"fixed_m", Json::array({centre.fixed[0], centre.fixed[1], centre.fixed[2]})},
+                                                {"latitude_deg", volume_detail::deg(centre.geodetic.latitude)},
+                                                {"longitude_deg", volume_detail::deg(centre.geodetic.longitude)},
+                                                {"height_m", centre.geodetic.height}, {"figure", figure.name()}})},
+                       {"axes", Json::object({{"names", Json::array({"east", "north", "up"})}, {"rotation", rows},
+                                              {"about", "the rows are the cube's east, north and up in the fixed frame; a cell's place is x₀ + Rᵀ o"}})}});
+}
+
 // The cube of `q` about `centre` (a mount's place, as mount_state gives it, whose address prints as
 // `canonical`) at the instant t, read in the world w by the registry's family.
 inline Json probe_volume(const World& w, const Registry& registry, const VolumeRequest& q, const MountState& centre, const std::string& canonical,
@@ -216,12 +247,9 @@ inline Json probe_volume(const World& w, const Registry& registry, const VolumeR
   const InstrumentInfo& info = in->info();
   if (const std::string why = not_a_field(in->kernel()); !why.empty()) throw std::invalid_argument(q.family + ": " + why);
   const auto& c = w.catalogue();
-  const auto b = centre.body.empty() ? std::nullopt : nf::body_frames(c, centre.body);
-  if (!b || !b->surface || !b->figure)
-    throw std::invalid_argument("the cube's axes are a body's east, north and up: its centre must be on or near a body with a surface, and " + canonical +
-                                " is in open space");
-  const gf::Ellipsoid& figure = *b->figure;
-  const Mat3 R = gf::Place::at(figure, centre.geodetic).to_enu;  // rows E, N, U in the fixed frame
+  const auto axes = cube_axes(w, centre, canonical);
+  const gf::Ellipsoid& figure = axes.first;
+  const Mat3 R = axes.second;
   const auto& g = c.graph();
   const StateTransform to_gcrs = g.transform(centre.fixed_frame, "GCRS", t), to_icrs = g.transform(centre.fixed_frame, "ICRS", t);
   const double tt = t.tt.minus({2451545.0, 0.0}) * mt::DAY;
@@ -230,19 +258,18 @@ inline Json probe_volume(const World& w, const Registry& registry, const VolumeR
   const int n = q.n;
   const std::size_t nn = std::size_t(n), cells = nn * nn * nn;
   const double a = q.edge_m;
+  const physis::fields::VolumeGrid grid{centre.fixed, R, {a, a, a}, {n, n, n}};
   const std::uint32_t family_key = key_of(q.family);
 
   // Each cell read as a mount of its own.
   std::vector<vd::Cell> out(cells);
   const auto sample = [&](std::size_t index) {
     vd::Cell& cell = out[index];
-    const std::size_t i = index % nn, j = index / nn % nn, k = index / (nn * nn);
-    const double oe = ((double(i) + 0.5) / n - 0.5) * a, on = ((double(j) + 0.5) / n - 0.5) * a, ou = ((double(k) + 0.5) / n - 0.5) * a;
     MountState m;
     m.address = canonical;
     m.body = centre.body;
     m.fixed_frame = centre.fixed_frame;
-    for (int x = 0; x < 3; x++) m.fixed[x] = centre.fixed[x] + R[0][x] * oe + R[1][x] * on + R[2][x] * ou;
+    m.fixed = grid.point(index);
     m.geodetic = figure.geodetic(m.fixed);
     m.on_body = m.geodetic.height < 0.05 * figure.a();
     m.gcrs = to_gcrs.position(m.fixed);
@@ -396,22 +423,22 @@ inline Json probe_volume(const World& w, const Registry& registry, const VolumeR
     }
   }
 
-  const auto& ts = w.spacetime().scales();
-  const Json rows = Json::array({Json::array({R[0][0], R[0][1], R[0][2]}), Json::array({R[1][0], R[1][1], R[1][2]}), Json::array({R[2][0], R[2][1], R[2][2]})});
   const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-  return Json::object({{"family", info.family}, {"title", info.title}, {"kernel", kernel_info(info.kernel).key}, {"provenance", name(info.provenance)},
-                       {"about", info.about}, {"model", info.model},
-                       {"time", Json::object({{"utc", t.has_utc ? Json(mt::format_iso(t.utc, mt::Scale::UTC, ts, 3)) : Json()}, {"tt_s", tt}})},
-                       {"centre", Json::object({{"address", canonical}, {"body", centre.body}, {"frame", centre.fixed_frame},
-                                                {"fixed_m", Json::array({centre.fixed[0], centre.fixed[1], centre.fixed[2]})},
-                                                {"latitude_deg", vd::deg(centre.geodetic.latitude)}, {"longitude_deg", vd::deg(centre.geodetic.longitude)},
-                                                {"height_m", centre.geodetic.height}, {"figure", figure.name()}})},
-                       {"axes", Json::object({{"names", Json::array({"east", "north", "up"})}, {"rotation", rows},
-                                              {"about", "the rows are the cube's east, north and up in the fixed frame; a cell's place is x₀ + Rᵀ o"}})},
-                       {"n", double(n)}, {"edge_m", a}, {"cell_m", a / n}, {"order", "east fastest, then north, then up"},
-                       {"quantities", quantities}, {"vector", vector},
-                       {"counts", Json::object({{"read", read}, {"outside", outside}, {"missing", missing}, {"invalid", invalid}})},
-                       {"reasons", reasons_json}, {"threads", double(threads)}, {"elapsed_s", elapsed}});
+  Json answer = Json::object({{"family", info.family}, {"title", info.title}, {"kernel", kernel_info(info.kernel).key}, {"provenance", name(info.provenance)},
+                              {"about", info.about}, {"model", info.model}});
+  const Json frame = cube_frame_json(w, centre, canonical, figure, R, t, tt);
+  for (const char* k : {"time", "centre", "axes"}) answer.set(k, frame[k]);
+  answer.set("n", double(n));
+  answer.set("edge_m", a);
+  answer.set("cell_m", a / n);
+  answer.set("order", "east fastest, then north, then up");
+  answer.set("quantities", quantities);
+  answer.set("vector", vector);
+  answer.set("counts", Json::object({{"read", read}, {"outside", outside}, {"missing", missing}, {"invalid", invalid}}));
+  answer.set("reasons", reasons_json);
+  answer.set("threads", double(threads));
+  answer.set("elapsed_s", elapsed);
+  return answer;
 }
 
 }  // namespace cosmopoiesis

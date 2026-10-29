@@ -9,7 +9,12 @@
 // catalogue's loops (the equinox route within a milliarcsecond), addresses read, printed and carried
 // between charts and back, the instruments' kernels; and the server's runtime and an acquisition
 // session in the engine (tests/check_runtime.py: the mission clock's time scales and commands, the
-// bus, releases and skips, the instruments' readings, a session's determinism, the policies).
+// bus, releases and skips, the instruments' readings, a session's determinism, the policies); and the
+// world's fields (decision 0007): their catalogue, a field read on a sampling and its curves, held to
+// NOAA's test values, the old operations' answers, the field equations and a family's own cube; and a
+// mission (decision 0008): the page's arithmetic of its map, and the engine's rover surveying the Moon's
+// crust at both fidelities and by both plans, the truth hidden until revealed, and the knowledge's
+// calibration over many truths.
 // The science itself is checked by the domains metrology, geodesy, astronomy, geophysics,
 // meteorology and navigation and by physis and calx; the drawing by the shared visualization layer.
 // Run from the repository root:  node applications/cosmopoiesis-lab/tests/run-tests.mjs
@@ -29,6 +34,7 @@ import { arrowsGeometry, cellOffset, cellPosition, centreValue, colourOf, gradie
 import { primary } from '../src/readings.js';
 import { nearestPlace } from '../src/pages/point.js';
 import { analysisHtml } from '../src/pages/sched.js';
+import { QUANTITIES, emptyMission, groupRange, merge, offsetMetres, project, rasterise, unproject, valueAt, whitenedBand } from '../src/mission.js';
 
 const { assert, check, skip, done } = suite();
 const APP = resolve(ROOT, 'applications/cosmopoiesis-lab');
@@ -122,6 +128,38 @@ if (existsSync(placesProduct)) {
   check('world: the Moon between samples (Hermite), on its circle', Math.hypot(m[0] - r * Math.cos(s), m[1] - r * Math.sin(s)), 0.5, 'm');
   assert('world: an instant inside the window is said to be', at.inside && !world.at(t0 - 10).inside);
   assert('world: the bodies\' facts are kept by key', world.info.get('moon')?.fixedFrame === 'MOON' && world.info.size === 3);
+}
+
+// ---- the mission's map, as the page reads it (src/mission.js) ---------------------------------------------------
+{
+  // A grid of 5 × 5 nodes about 7.5 N, 59 W, a linear field on it: bilinear reading is exact for it.
+  const n = 5, lat = [7.52, 7.51, 7.5, 7.49, 7.48], lon = [-59.02, -59.01, -59.0, -58.99, -58.98];
+  const f = (la, lo) => 3 * la - 2 * lo + 1;
+  const values = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) values.push(f(lat[i], lon[j]));
+  const map = { n, half_m: 600, lat_deg: lat, lon_deg: lon, mean_total_nT: values, prior_total_nT: values.map((v) => v + 1), truth_total_nT: values.map((v) => v - 2) };
+  const [x, y] = project(map, 7.503, -59.007, 200, 200);
+  const [la, lo] = unproject(map, x, y, 200, 200);
+  check('mission map: a place projected onto the picture and back', Math.abs(la - 7.503) + Math.abs(lo + 59.007), 1e-12, '°');
+  let worst = 0;
+  for (const [px, py] of [[0, 0], [200, 200], [37.3, 151.9], [100, 100]]) {
+    const [pla, plo] = unproject(map, px, py, 200, 200);
+    worst = Math.max(worst, Math.abs(valueAt(map, values, px, py, 200, 200) - f(pla, plo)));
+  }
+  check('mission map: the bilinear reading of a linear field is the field (at corners and between nodes)', worst, 1e-9);
+  const rgba = rasterise(map, values, (u) => [u, u, u], (v) => (v - 140) / 10, 16, 16);
+  assert('mission map: a picture of 16 × 16 pixels, every pixel coloured', rgba.length === 16 * 16 * 4 && rgba.every((c, i) => i % 4 !== 3 || c === 255));
+  const r = groupRange(map, QUANTITIES.find((q) => q.key === 'mean'));
+  assert('mission map: the posterior, the prior and the truth share one scale, their union', r[0] === Math.min(...values) - 2 && r[1] === Math.max(...values) + 1, JSON.stringify(r));
+  const [e, nn] = offsetMetres(map, 7.5, -59.0 + 0.01);
+  check('mission map: east of the centre by 0.01° of longitude at 7.5 N', Math.abs(e - 0.01 * Math.PI / 180 * 1737.4e3 * Math.cos(7.5 * Math.PI / 180)) + Math.abs(nn), 1e-9, 'm');
+  let m = merge(emptyMission(), { track: [[1, 1], [1, 2]], track_total: 2, readings: [{ t_s: 0 }], readings_total: 1 });
+  m = merge(m, { track: [[1, 3]], track_total: 3, readings: [], readings_total: 1 });
+  assert('mission: increments are gathered in order, and the whole is complete', m.track.length === 3 && m.track[2][1] === 3 && m.readings.length === 1 && m.complete);
+  const gap = merge(m, { track: [[9, 9]], track_total: 40, readings: [], readings_total: 7 });
+  assert('mission: increments of another mission are not spliced in: the page asks for the whole', gap.complete === false);
+  const band = whitenedBand(200);
+  check('mission: the innovations\' band is 1 ± 1.96 √(2/n)', Math.abs(band[1] - 1 - 1.96 * 0.1), 1e-12);
 }
 
 // ---- the navigator and the provenance of readings ---------------------------------------------------------------
@@ -460,6 +498,120 @@ if (!state || !state.built || !state.data.ephemeris) {
       once.error || '');
   }
 
+  // ---- the world's fields (decision 0007): the catalogue, samplings, curves, a field's cube ----------------------
+  {
+    const T0 = '2026-10-28T12:00:00Z';
+    const nan = (xs) => (xs || []).map((v) => (v === null ? NaN : v));
+    const cat = ask({ op: 'fields' }).fields || [];
+    const byName = new Map(cat.map((f) => [f.name, f]));
+    const names = ['earth.magnetic', 'earth.magnetic.core', 'earth.gravity.normal', 'earth.atmosphere.temperature', 'earth.atmosphere.pressure',
+      'earth.atmosphere.density', 'earth.atmosphere.speed_of_sound', 'moon.magnetic.crust', 'moon.magnetic.unresolved', 'moon.magnetic'];
+    assert('fields: the world holds ten fields, the domains\' models, each with its descriptor', names.every((n) => byName.has(n)) && cat.length === 10, cat.map((f) => f.name).join(', '));
+    const moonField = byName.get('moon.magnetic');
+    assert('fields: the Moon\'s composite is synthetic, its parts the assimilated model and the synthetic scales, read on spheres row by row',
+      !moonField?.available || (moonField.provenance === 'synthetic' && moonField.parts?.map((x) => `${x.name}:${x.provenance}`).join() === 'moon.magnetic.crust:assimilated,moon.magnetic.unresolved:synthetic'
+        && moonField.capabilities.includes('sphere grid') && moonField.representation.kind === 'composite' && moonField.law?.band?.join() === '30,250'));
+    assert('fields: WMM2025\'s time is the world\'s; normal gravity\'s and the standard atmosphere\'s none',
+      byName.get('earth.magnetic')?.time?.startsWith('TT seconds from J2000.0') && byName.get('earth.gravity.normal')?.time === 'none' && byName.get('earth.atmosphere.pressure')?.fibre?.unit === 'Pa');
+
+    // NOAA's test point at 65 km over 43° N, 93° E in 2025.0, read at its place on the ITRS's axes.
+    const wgs84 = (latDeg, lonDeg, h) => {
+      const a = 6378137, f = 1 / 298.257223563, e2 = f * (2 - f), p = latDeg * Math.PI / 180, l = lonDeg * Math.PI / 180;
+      const N = a / Math.sqrt(1 - e2 * Math.sin(p) ** 2);
+      return [(N + h) * Math.cos(p) * Math.cos(l), (N + h) * Math.cos(p) * Math.sin(l), (N * (1 - e2) + h) * Math.sin(p)];
+    };
+    const test = readFileSync(resolve(ROOT, 'domains/geophysics/tests/fixtures/wmm2025-test-values.txt'), 'utf8').split('\n').filter((l) => l.trim() && !l.startsWith('#'))
+      .map((l) => l.trim().split(/\s+/).map(Number)).find((r) => r[0] === 2025 && r[2] === 43 && r[3] === 93);
+    if (test && byName.get('earth.magnetic')?.available) {
+      const at = wgs84(43, 93, test[1] * 1000), up = [Math.cos(43 * Math.PI / 180) * Math.cos(93 * Math.PI / 180), Math.cos(43 * Math.PI / 180) * Math.sin(93 * Math.PI / 180), Math.sin(43 * Math.PI / 180)];
+      const one = ask({ op: 'field.sample', field: 'earth.magnetic', time: '2025-01-01T00:00:00Z', sampling: { kind: 'points', points: [at] } });
+      const B = nan(one.values);
+      const nT = 1e-9;
+      check('field.sample: WMM2025 at NOAA\'s test point, |B| = F and B · up = −Z (the file departs from the report by 7e-4 nT)',
+        Math.max(Math.abs(Math.hypot(...B) / nT - test[10]), Math.abs((B[0] * up[0] + B[1] * up[1] + B[2] * up[2]) / nT + test[9])), 1e-3, 'nT');
+    }
+    const timeless = ask({ op: 'field.sample', field: 'earth.magnetic', sampling: { kind: 'points', points: [[7e6, 0, 0]] } });
+    assert('field.sample: a field that depends on the time is not read without one', /depends on the time/.test(timeless.error || ''), timeless.error);
+
+    // The Moon's crust on a sphere: the same numbers as field_map gives, which is now a sampling of it.
+    if (byName.get('moon.magnetic.crust')?.available) {
+      const sphere = { kind: 'sphere', centre: [0, 0, 0], radius_m: 1737400, nlat: 90, nlon: 180 };
+      const s2 = ask({ op: 'field.sample', field: 'moon.magnetic.crust', sampling: sphere, reduce: 'magnitude' });
+      const m2 = ask({ op: 'field_map', body: 'moon', quantity: 'total', step_deg: 2 });
+      const v = nan(s2.values);
+      check('field.sample: the Moon\'s |B| on a 2° sphere is field_map\'s, value for value (relative)',
+        v.length === 16200 && m2.values?.length === 16200 ? Math.max(...v.map((x, i) => Math.abs(x - m2.values[i]) / m2.values[i])) : NaN, 1e-12);
+      assert('field.sample: every cell read, no reason, a range of |B|', s2.counts?.valid === 16200 && s2.reasons?.length === 0 && s2.range?.max > s2.range?.min);
+      const low = ask({ op: 'field.sample', field: 'moon.magnetic.crust', sampling: { kind: 'sphere', radius_m: 1737400 - 3000, nlat: 6, nlon: 12 } });
+      assert('field.sample: on low ground below the model\'s sphere every cell is read with the note, counted once',
+        low.counts?.valid === 72 && low.notes?.[0]?.count === 72 && /not continued downward/.test(low.notes?.[0]?.text || ''), JSON.stringify(low.notes));
+    }
+
+    // Normal gravity in a volume about a point, on its axes east, north and up: ∇·γ = 2ω² and ∇×γ = 0. With
+    // cells of h = 20 km / 7 at 100 km up, each derivative errs by some 4 (h/r)² γ/r = 1.1e-12 s⁻², a
+    // ten-thousandth of 2ω², and the values are doubles.
+    {
+      const lat = -30 * Math.PI / 180, lon = 140 * Math.PI / 180;
+      const E = [-Math.sin(lon), Math.cos(lon), 0], N = [-Math.sin(lat) * Math.cos(lon), -Math.sin(lat) * Math.sin(lon), Math.cos(lat)];
+      const U = [Math.cos(lat) * Math.cos(lon), Math.cos(lat) * Math.sin(lon), Math.sin(lat)];
+      const n = 7, edge = 20000, h = edge / n;
+      const vol = ask({ op: 'field.sample', field: 'earth.gravity.normal', sampling: { kind: 'volume', centre: wgs84(-30, 140, 100e3), axes: [E, N, U], edges: [edge, edge, edge], n: [n, n, n] }, reduce: 'on_axes' });
+      const g = nan(vol.values), at = (c, i, j, k) => g[3 * (i + n * (j + n * k)) + c];
+      let div = 0, curl = 0, used = 0;
+      for (let k = 1; k < n - 1; k++) for (let j = 1; j < n - 1; j++) for (let i = 1; i < n - 1; i++) {
+        const d = (c, axis) => (axis === 0 ? at(c, i + 1, j, k) - at(c, i - 1, j, k) : axis === 1 ? at(c, i, j + 1, k) - at(c, i, j - 1, k) : at(c, i, j, k + 1) - at(c, i, j, k - 1)) / (2 * h);
+        div = Math.max(div, Math.abs(d(0, 0) + d(1, 1) + d(2, 2) - 2 * 7.292115e-5 ** 2));
+        curl = Math.max(curl, Math.hypot(d(2, 1) - d(1, 2), d(0, 2) - d(2, 0), d(1, 0) - d(0, 1)));
+        used++;
+      }
+      check('field.sample: normal gravity on its volume\'s own axes has ∇·γ = 2ω² (125 inner cells; relative to 2ω²)', used === 125 ? div / (2 * 7.292115e-5 ** 2) : NaN, 1e-3);
+      check('field.sample: and ∇×γ = 0', used === 125 ? curl : NaN, 1e-11, '1/s²');
+    }
+    const tooMany = ask({ op: 'field.sample', field: 'earth.gravity.normal', sampling: { kind: 'sphere', radius_m: 7e6, nlat: 2048, nlon: 4096 } });
+    const scalarReduced = ask({ op: 'field.sample', field: 'earth.atmosphere.temperature', sampling: { kind: 'points', points: [[6.4e6, 0, 0]] }, reduce: 'magnitude' });
+    const unknown = ask({ op: 'field.sample', field: 'earth.nothing', sampling: { kind: 'points', points: [[6.4e6, 0, 0]] } });
+    assert('field.sample: too many points, a reduction of a scalar and an unknown field are refused, each with its reason',
+      /more than the/.test(tooMany.error || '') && /reduces a vector/.test(scalarReduced.error || '') && /no field earth.nothing/.test(unknown.error || ''),
+      [tooMany.error, scalarReduced.error, unknown.error].join(' | '));
+    const air = ask({ op: 'field.sample', field: 'earth.atmosphere.temperature', sampling: { kind: 'points', points: [wgs84(45, 10, 15000), wgs84(45, 10, 100e3)] } });
+    assert('field.sample: 15 km up the standard atmosphere is at its tropopause, 216.65 K; 100 km up there is none, and the reason',
+      Math.abs(nan(air.values)[0] - 216.65) < 1e-9 && Number.isNaN(nan(air.values)[1]) && air.quality?.[1] === 1 && /1976 standard's heights/.test(air.reasons?.[0]?.text || ''), JSON.stringify(air.values));
+
+    // Field lines of the core's field: within their shell, each end with why it ended, |B| along them the field's.
+    if (byName.get('earth.magnetic.core')?.available) {
+      const R = 6371.2e3;
+      const seeds = [[0, R + 100e3, 0], [(R + 100e3) * Math.cos(Math.PI / 6), 0, (R + 100e3) * Math.sin(Math.PI / 6)]];
+      const cv = ask({ op: 'field.curves', field: 'earth.magnetic.core', time: T0, seeds, within: { inner_m: R, outer_m: 6 * R } });
+      const pts = (cv.curves || []).flatMap((c) => c.points || []);
+      assert('field.curves: two lines, every point within the shell from the sphere to six Earth radii',
+        cv.curves?.length === 2 && pts.length > 20 && pts.every((x) => Math.hypot(...x) >= R * (1 - 1e-12) && Math.hypot(...x) <= 6 * R), `${pts.length} points`);
+      assert('field.curves: a line from 30° N closes at the ground, both its ends at the edge of the base or the shell, with the reason',
+        (cv.curves || []).every((c) => c.backward?.stop === 'edge' && c.forward?.stop === 'edge' && c.backward.reason && c.forward.reason), JSON.stringify(cv.curves?.map((c) => [c.backward, c.forward])));
+      const line = cv.curves?.[1];
+      if (line?.points) {
+        const pick = [0, Math.floor(line.points.length / 2), line.points.length - 1];
+        const at = ask({ op: 'field.sample', field: 'earth.magnetic.core', time: T0, sampling: { kind: 'points', points: pick.map((i) => line.points[i]) }, reduce: 'magnitude' });
+        check('field.curves: |B| along a line is the field\'s at its points (to float32)', Math.max(...pick.map((i, k) => Math.abs(line.magnitude[i] - nan(at.values)[k]) / nan(at.values)[k])), 1e-7);
+      }
+    }
+
+    // A field's cube beside its instrument's: the same cells, the same values, the vector turned alike.
+    if (byName.get('earth.magnetic')?.available) {
+      const req = { op: 'probe_volume', at: 'earth(51.4769 N, 0.0005 W, 200 km)', time: T0, edge_m: 200000, n: 5 };
+      const fieldCube = ask({ ...req, field: 'earth.magnetic' }), familyCube = ask({ ...req, family: 'magnetometer.wmm2025' });
+      const q = (a, nm) => nan(a.quantities?.find((x) => x.name === nm)?.values);
+      const mag = q(fieldCube, 'magnitude_T'), tot = q(familyCube, 'total_T');
+      check('probe volume: a field\'s cube (earth.magnetic) gives the magnetometer\'s |B| in every cell (relative)', mag.length === 125 ? Math.max(...mag.map((x, i) => Math.abs(x - tot[i]) / tot[i])) : NaN, 1e-12);
+      const fv = fieldCube.vector || {}, mv = familyCube.vector || {};
+      check('probe volume: and the same vector on the cube\'s axes, the one turned from the field\'s frame, the other from each cell\'s north, east and down (of |B|)',
+        mag.length === 125 ? Math.max(...['east', 'north', 'up'].flatMap((c) => nan(fv[c]).map((x, i) => Math.abs(x - nan(mv[c])[i]) / tot[i]))) : NaN, 1e-12);
+      assert('probe volume: a field\'s cube names its field and its provenance, and is the same shape as a family\'s',
+        fieldCube.field === 'earth.magnetic' && fieldCube.kernel === 'field' && fieldCube.provenance === 'model' && fieldCube.counts?.read === 125 && fieldCube.axes?.rotation?.length === 3);
+      const wrongFrame = ask({ op: 'probe_volume', at: 'moon(7.5 N, 59 W)', time: T0, field: 'earth.magnetic', edge_m: 1000, n: 3 });
+      assert('probe volume: a field is read in its own frame: the Earth\'s about a point on the Moon is refused', /its own frame/.test(wrongFrame.error || ''), wrongFrame.error);
+    }
+  }
+
   // ---- coordinates: the top of the Eiffel Tower ----------------------------------------------------------
   const eiffel = { system: 'geodetic', latitude_deg: 48.8584, longitude_deg: 2.2945, height_m: 330 };
   const c = ask({ op: 'convert', time: '2026-10-28T12:00:00Z', point: eiffel, observer: { latitude_deg: 48.8606, longitude_deg: 2.3376, height_m: 35 } });
@@ -503,6 +655,64 @@ if (!state || !state.built || !state.data.ephemeris) {
     }
   }
 }
+
+// ---- a mission: the rover, its readings and what it learns (engine/mission.hpp) ---------------------------------
+if (state && state.built && state.data.ephemeris && state.data.moon_magnetic) {
+  const ask = (request) => {
+    const r = spawnSync(python, [resolve(APP, 'engine.py'), 'run', '-'], { cwd: ROOT, input: JSON.stringify(request), encoding: 'utf8', timeout: 300000 });
+    try { return JSON.parse(r.stdout); } catch { return { error: (r.stderr || r.stdout || '').slice(-300) }; }
+  };
+  const short = { lines: 2, length_m: 200, spacing_m: 100, interval_m: 10 };
+  const run = ask({ op: 'mission.run', config: short, seconds: 20000, map: { half_m: 500, n: 11 } });
+  if (run.error) assert('mission: a short survey runs', false, run.error);
+  else {
+    const k = run.knowledge, band = whitenedBand(k.observations);
+    assert('mission: the lawnmower is driven to its end, and the rover at rest', run.done && Math.abs(run.rover.speed_m_s) < 1e-3, `${run.rover.odometer_m} m`);
+    assert('mission: a reading every 10 m driven, and one where it started', run.readings_total === Math.floor(run.rover.odometer_m / 10) + 1, `${run.readings_total} readings, ${run.rover.odometer_m} m`);
+    assert('mission: three observations a reading', k.observations === 3 * run.readings_total);
+    assert('mission: the whitened innovations\' mean square within its 95 % band', k.whitened_mean_square > band[0] && k.whitened_mean_square < band[1], `${k.whitened_mean_square} in ${band}`);
+    assert('mission: the truth is hidden unless revealed (no truth in the state, the readings or the map)',
+      !run.truth && run.readings.every((r) => !r.truth_ned_nT) && !run.map.truth_total_nT && !run.map.calibration);
+    assert('mission: where it has read, the field is known far better than before', Math.min(...run.map.sd_down_nT) < 0.1 * run.map.prior_sd_down_nT,
+      `${Math.min(...run.map.sd_down_nT)} against ${run.map.prior_sd_down_nT} nT`);
+  }
+  const shown = ask({ op: 'mission.run', config: short, seconds: 20000, map: { half_m: 500, n: 11 }, reveal: true });
+  if (!shown.error) {
+    const c = shown.map.calibration;
+    assert('mission: revealed, the posterior\'s error of |B| is below the prior\'s (T2015_449 alone)', c.rms_error_total_nT < 0.5 * c.rms_error_prior_total_nT, `${c.rms_error_total_nT} against ${c.rms_error_prior_total_nT} nT`);
+    assert('mission: and the readings carry the truth they read', shown.readings.every((r) => Array.isArray(r.truth_ned_nT)) && shown.truth?.degree === 1440);
+    const r0 = shown.readings[3];
+    const noise = Math.hypot(...r0.ned_nT.map((v, i) => v - r0.truth_ned_nT[i]));
+    assert('mission: a reading is the truth with noise of 0.5 nT a component (within 5 sd of its magnitude)', noise < 5 * 0.5 * Math.sqrt(3), `${noise} nT`);
+  }
+  const dyn = ask({ op: 'mission.run', config: { ...short, fidelity: 'dynamic' }, seconds: 20000 });
+  if (dyn.error) assert('mission: the dynamic rover runs', false, dyn.error);
+  else {
+    assert('mission: the dynamic rover drives the same survey to its end', dyn.done && dyn.readings_total >= run.readings_total - 1, `${dyn.readings_total} readings`);
+    check('mission: the ground carries its 140 kg in the Moon\'s gravity (N/(m g) − 1)', Math.abs(dyn.rover.normal_N / (140 * 4.9028001e12 / 1737.4e3 ** 2) - 1), 1e-6);
+  }
+  const adaptive = ask({ op: 'mission.run', config: { plan: 'adaptive', budget_m: 400, ring_m: 60, area_m: 150, interval_m: 10 }, seconds: 20000 });
+  if (adaptive.error) assert('mission: an adaptive survey runs', false, adaptive.error);
+  else {
+    const site = adaptive.site, R = 1737.4e3, d = Math.PI / 180;
+    const far = Math.max(...adaptive.track.map(([la, lo]) => Math.hypot((la - site.lat_deg) * d * R, (lo - site.lon_deg) * d * R * Math.cos(site.lat_deg * d))));
+    assert('mission: the adaptive survey drives its budget, choosing each place where the field is least known', adaptive.done && adaptive.rover.odometer_m >= 400, `${adaptive.rover.odometer_m} m`);
+    assert('mission: and keeps within its area and a ring\'s reach of it', far <= 150 + 60 + 1, `${far} m`);
+  }
+  const wrong = ask({ op: 'mission.run', config: { plan: 'spiral' } });
+  assert('mission: a plan it does not know is refused, saying which it knows', /lawnmower/.test(wrong.error || ''));
+  const none = ask({ op: 'mission.step', session: 'nobody', seconds: 10 });
+  assert('mission: stepping a mission never started is refused', /no mission/.test(none.error || ''));
+  const cal = ask({ op: 'mission.calibrate', config: { lines: 2, length_m: 200, spacing_m: 100, interval_m: 20 }, seeds: 24, half_m: 2000, n: 5 });
+  if (cal.error) assert('mission: the calibration runs', false, cal.error);
+  else {
+    // 24 truths: the rms z's standard error is about 1/√(2 × 24) ≈ 0.14 (fewer independent draws than nodes).
+    assert('mission: over 24 truths the posterior\'s z of B down has rms near 1', cal.rms_z_down > 0.65 && cal.rms_z_down < 1.35, `${cal.rms_z_down}`);
+    assert('mission: and its 95 % intervals cover about 95 %', cal.coverage_95_down > 0.85 && cal.coverage_95_down <= 1, `${cal.coverage_95_down}`);
+    const b = whitenedBand(cal.observations);
+    assert('mission: the whitened innovations, pooled, within their 95 % band', cal.whitened_mean_square > b[0] && cal.whitened_mean_square < b[1], `${cal.whitened_mean_square} in ${b}`);
+  }
+} else skip('mission: the engine, the ephemeris or the Moon\'s crustal model is not in the cache (python data/acquisition/fetch.py moon-magnetic-t2015)');
 
 // ---- the server's runtime, and a session in the engine (tests/check_runtime.py) ------------------------------------
 if (!python) skip('runtime: no Python');

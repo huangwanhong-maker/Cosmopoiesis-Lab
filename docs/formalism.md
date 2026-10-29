@@ -240,7 +240,13 @@ A drawing is therefore not a kind of phenomenon but a composite map from the phe
 
 *Rationale.* The split is the representation layer's (the infrastructure's [visualization](https://github.com/huangwanhong-maker/The-Science-Infrastructures/tree/main/visualization): a device-neutral scene, and a renderer for each technique): the restriction and the reduction are computation, the engine's, and travel as data with their units and frames (the field map restricts $B$ to the sphere and reduces it to $\lvert B\rvert$ or $B_r$; the field lines integrate $B/\lvert B\rvert$); the mark is a renderer's. A new renderer changes the marks, not the expressions.
 
-*Remark (hue and provenance).* The console reserves three families of hue for provenance (Definition 8.7). Where a field is drawn in colour its hue may be its provenance's and its magnitude carried by lightness and opacity: the Earth's field lines are modelled and drawn in the modelled blue; the Moon's crust is assimilated and drawn in gold, logarithmic from 1 nT, clear where the crust is weakly magnetised. Its diverging radial component takes orchid for the inward half, which is no provenance's hue.
+*Remark (hue and provenance).* The console reserves three families of hue for provenance (Definition 8.7), and keeps them for the readings and the tags. A field's own colour carries its reduced value, on a map validated for the colour-vision deficiencies, with its provenance named in its legend:
+
+- the Earth's field lines carry $\lvert B\rvert$ along them on the plum map, logarithmic, bright near the ground and fading outward;
+- the Moon's crust is drawn in gold, logarithmic from 1 nT, clear where the crust is weakly magnetised;
+- its radial component is diverging, violet inward and gold outward, clear about zero.
+
+*Remark (the scene model).* These expressions are data of the shared scene model (the infrastructure's `visualization/scene`, its ADR 0053): a restriction, a reduction, a mark and a colour, checked by this section's rules before anything is drawn. A vector's colour needs a reduction. A component is never drawn without its frame. A magnitude has no sign to diverge about, and an absolute temperature has no natural zero. A label takes categorical hues. The fields themselves are the domains' models as physis's fields, each with its base, fibre, representation and provenance (decision 0007), so that the kind of a phenomenon (Definition 3.9) and its drawing (Definition 3.10) are both types of the code.
 
 The slice's expressions, in these terms: the Earth's field lines ($B'$ the region from 100 km above the ground to six Earth radii, $F'=B$, integral curves); the Moon's crust ($B'$ the sphere of 1737.4 km, $F'=\lvert B\rvert$ or $B_r$, a drape); the compass ($B'$ a point, $F'$ the bearing of the horizontal field, a needle on a rose, and outside its coverage no needle but the reason); the body's north at the centre of the view (a point, the meridian's direction, projected: a needle); the space weather ($B'$ time alone, gauges) and its events (lamps and messages).
 
@@ -515,6 +521,53 @@ with $R_n^{\text{model}}=0$ above the model's degree, from a counter-based strea
 
 **The solar wind.** The external part is the interplanetary field measured at L1 (SWPC's real-time magnetometer, one-minute values in GSE axes), carried ballistically to the Moon at the solar wind's speed. By Taylor's frozen-in hypothesis the field is advected unchanged: $B_{\text{ext}}(x,t)=B_{L1}\big(t-(x_{L1}-x_\parallel)/v\big)$, with $x_\parallel$ the Moon's place along the Sun–Earth line and $x_{L1}=1.5\times10^9$ m, a travel of about an hour. Inside the Earth's magnetotail, taken as a cylinder of 25 Earth radii on the night side, there is no solar wind and the part is left out, with the reason. *Caveat.* Ballistic propagation ignores the tilt of the field's phase fronts, which moves the arrival by minutes (Mailyan, Munteanu and Haaland 2008). The Moon's wake and the plasma's interaction with the strongest anomalies, whose fields stand off the solar wind above Reiner Gamma (Lue et al. 2011), are not modelled. The magnetotail's shape is a cylinder only to first order. This part's provenance is *physical*, the crust's is *assimilated*, and the reading lists the provenance of each.
 
+### 8.8 The World, Its Bodies and What Is Known: The Triple Relation
+
+A world, the bodies in it, and what is known of the world are three things, and the engine keeps them apart (decision 0008). The world holds the truth. A body is a configuration with a hybrid model and ports (Definition 8.1), with no physical privilege. It reads the truth only through its instruments, at the places its motion brings it to. What is known is a field of distributions, held by an agent or by a mission, and changed only by readings delivered to its holder.
+
+**Definition 8.13 (knowledge).** A *knowledge* of a field $f$ over a base $X$ is a tuple $\kappa=(h,\pi_0,\mathcal Y,\Phi)$:
+- a holder $h$, an agent or a mission;
+- a prior $\pi_0$, a law of $f$ (its fibre over each point a distribution: a field in the sense of §3 whose values are laws);
+- the readings $\mathcal Y=\{y_j : t^d_j\le t\}$ delivered to $h$ by $t$;
+- an update $\Phi$, the posterior $\pi_t=\Phi(\pi_0,\mathcal Y)$.
+
+Its provenance is *assimilated* (Definition 8.7). The truth $f^\ast$ is the world's, and no part of $\kappa$ reads it except through a reading.
+
+The first knowledge is Gaussian:
+- $\pi_0=\mathcal{GP}(m,K)$, with $m$ a model (T2015_449) and $K$ the covariance of the part it leaves unresolved (Definition 8.11, at every pair of points by Schmidt's addition theorem: physis `analysis`);
+- each reading $y_j=L_jf^\ast+\varepsilon_j$, a linear functional with Gaussian noise of known variance;
+- $\Phi$ is conditioning (tyche `spatial`), exact for this model.
+
+**Proposition 8.14 (calibration by construction).** Let the truth be a draw from the prior, $f^\ast\sim\pi_0$, and the readings' noise be the model's. Then:
+- (a) for any functional $q$ of the field, $z_q=(q(f^\ast)-\mathbb E_{\pi_t}[q])/\mathrm{sd}_{\pi_t}[q]$ is standard normal;
+- (b) the whitened innovations $w=L^{-1}(y-\mathbb E\,y)$, with $LL^{\mathsf T}=\mathrm{Cov}(y)$ the Cholesky factor of the readings' prior covariance, are independent standard normals.
+
+*Proof.* (a) Given $y$, the law of $q(f^\ast)$ is the posterior's, Gaussian with that mean and deviation, so $z_q\mid y\sim\mathcal N(0,1)$ for every $y$, and so unconditionally. (b) Under the model $y\sim\mathcal N(\mathbb E\,y,LL^{\mathsf T})$, and $L^{-1}$ whitens it. $\square$
+
+(b) is the test a knowledge can make of itself without the truth. A rejected test says that the prior or the noise model is wrong. (a) is the god's test: the page's *Reveal* sets the truth beside the knowledge. One map's nodes are correlated, being one truth, so (a) is tested over many truths (`mission.calibrate`).
+
+*Remark (what a body discovers).* The law of T2015's unresolved part puts its sources at an effective 6.6 km. Its power peaks at degree 450 (24 km) and is all but 0.3% carried by degree 1440. A rover's kilometre therefore sees the field's value and gradients, which the model's regularisation lost, not structure of its own scale. A shallower law would give that, and is open.
+
+**Definition 8.15 (fidelities of a body, and their translation).** A body may be modelled at several fidelities $\Sigma_1,\dots,\Sigma_k$ under one interface of commands and readings. A translation between $\Sigma_i$ and $\Sigma_j$ is a pair:
+- a projection $p:X_j\to X_i$ of states;
+- a lift $\ell:X_i\to X_j$;
+
+with $p\circ\ell=\mathrm{id}$. $\Sigma_i$ is the *limit* of $\Sigma_j$ when a parameter of $\Sigma_j$ going to a limit makes its motion converge to $\Sigma_i$'s, for every command.
+
+The first case is a vehicle on a sphere (the robotics domain):
+- the kinematic unicycle, $\dot A=A\,(0,v/R,\omega)^\wedge$ on $SO(3)$;
+- the dynamic vehicle, a mass held to the sphere by RATTLE, driven through a speed loop of time constant $\tau$ against Coulomb friction.
+
+Projection reads the forward speed. Lift sets $p=mve$ and the ground's force $m(g-v^2/R)$. The kinematic vehicle is the limit $\tau\to0$ on firm ground: driving straight from rest, the dynamic vehicle lags by exactly $v^\ast(\tau-h)$. A mission chooses the fidelity a run needs. Its readings, knowledge and plan do not depend on the choice.
+
+**Dynamics from an action.** A body's model $\Sigma$ is stated, where it has one, as a Lagrangian. Its motion is the stationary path of a discrete action (physis decision 0013):
+- symmetries' momenta are conserved exactly (discrete Noether);
+- forces enter by the discrete Lagrange–d'Alembert principle;
+- coupling is a term of the action;
+- a rigid body moves by a Lie group variational integrator.
+
+The Euclidean path integral is the same discrete action with imaginary time. It is not needed for classical motion; it gives a body's quantum statistics where they matter.
+
 ## 9. Scenario, Evidence, Experiment and Run
 
 **Definition 9.1.** A *world definition* $W$ is the carrier with its decomposition and cellulation families, its frames, its fields with their kinds and supports, its materials with their relations, its models and interface relations, and its agents' definitions (§§1–8). A *scenario* $\mathcal S=(W,\gamma,\theta,\varphi_0,\beta,f,\mathcal B)$ selects a geometry hypothesis $\gamma$ (an occupancy, a terrain, a figure), parameters $\theta$, initial fields $\varphi_0$, boundary data $\beta$, forcing $f$, and the *bindings* $\mathcal B$ of these to evidence (which dataset, which product, which version). An *experiment* $\mathcal E=(\mathcal S,\mathcal N,\mathcal K)$ adds the numerical plan $\mathcal N$ (cellulations, methods, steps and schedule, tolerances, seeds, threads) and the evaluation $\mathcal K$ (observables, references, tolerances, what is to be claimed). A *run* is the record of an experiment's execution: its manifest (with the commit of every library and the version of every dataset used), its committed snapshots, its invariants and interface residuals at every macro step, its events, the readings delivered, its checkpoints.
@@ -556,11 +609,12 @@ Every result above that can be checked numerically is checked, by a program on c
 | 2.7 every answer is an address of the event | the Eiffel Tower answered in the ICRS, galactic, ecliptic, Earth–Moon rotating, TEME and galactocentric frames and read back, within 1 mm (within $10^5$ m from the Galaxy's centre); a step by azimuth, elevation and range from the Louvre reaching the tower within 1 mm; galactocentric coordinates against astropy to $10^{-15}$ | S |
 | 2.9 holonomy | the CIO and equinox routes to the ITRS within 1 mas; DE440's Moon and the IAU's within arcseconds; GMST 1982 against IAU 2006 by tens of mas | S |
 | 2.2 kinematics of a frame change | a point in a rotating frame: velocity and acceleration against the closed form; the round trip of a chain of three frames to $10^{-12}$ m at 10 m | 0 |
-| 3.6 $dd=0$, Stokes | on every cellulation the engine builds (boxes, spheres, shells, terrains, glued complexes) | 0 |
+| 3.6 $dd=0$, Stokes | on every cellulation the engine builds (boxes, spheres, shells, terrains, glued complexes); on boxes of one, two and three dimensions now, with the orientation of their incidences against their geometry (physis `check_geometric`) | 0 |
+| 3.10 a visual expression | the scene model's rules refuse what they forbid (a vector coloured without a reduction, a component without its frame, a magnitude diverging about zero); every colour map monotone in lightness, or its arms, in normal vision and with each deficiency, against colorspacious (visualization's checks) | S |
 | 3.8 Hodge decomposition | the Helmholtz projection of a flow on a basin with islands: the harmonic part's dimension equals the number of islands | 3 |
-| 5.3 exact discrete balance | heat in a box: the total energy's change equals the boundary flux to rounding; the sine mode against $T_b+Ae^{-\lambda t}\sin(\pi x/L)$ at second order in $h$ | 0 |
-| 5.6 exact interface conservation | two boxes glued on a face: the interface residual zero to rounding at every macro step, with unequal micro steps | 1 |
-| 6.2 conservative transfer | a density transferred to a refinement keeps its total; the flux through an interface cellulated twice differs by the quadrature error alone | 1 |
+| 5.3 exact discrete balance | heat in a box: the total energy's change equals the boundary flux to rounding, whatever the solve's tolerance ($10^{-17}$ of the stored energy with a solve to $10^{-6}$); the sine mode against $T_b+Ae^{-\lambda t}\sin(\pi x/L)$ at second order in $h$ (physis `check_heat`) | 0 |
+| 5.6 exact interface conservation | two materials in one box: what leaves one through their interface enters the other, to rounding (physis `check_heat`); two boxes glued on a face: the interface residual zero to rounding at every macro step, with unequal micro steps | 1 |
+| 6.2 conservative transfer | a density transferred to a refinement keeps its total, and the transfer commutes with $d$ in every degree on boxes (physis `check_geometric`); the flux through an interface cellulated twice differs by the quadrature error alone | 1 |
 | 7.2 harmonic expansion | the Moon's gravity from GRGM1200A at degree 2 against the closed form of $J_2$; Laplace's equation of the evaluated potential to rounding | 2 |
 | 7.4 configuration variety | a four-bar linkage: one degree of freedom; its singular configurations found by the rank of $J$ | 2 |
 | 7.5 constrained dynamics | a pendulum as a constrained particle: the constraint kept to $10^{-12}$ over $10^5$ steps by projection; the energy's drift bounded | 2 |
@@ -584,13 +638,13 @@ Every result above that can be checked numerically is checked, by a program on c
 | $\mathcal E$, $\psi$, $\ell_p$ | events; a chart; a step from the horizon at $p$ | — | navigation `Address`, `Event`, `resolve`, `express` |
 | $U_e$, $\mathrm{hol}(\gamma)$, $\theta(\gamma)$ | a frame transport; a loop's holonomy and its angle | —, —, rad | physis `FrameGraph`; navigation `Catalogue::holonomies` |
 | $\mathbb D$, $\mathbb R_\delta$ | dimensions; quantities of dimension $\delta$ | — | physis `Dimension`, `Quantity` |
-| $\omega\in\Omega^k$, $c\in C^k$ | a $k$-form; a $k$-cochain | the field's | `Field`, physis `Cochain` |
-| $\mathcal R$, $\mathcal W$ | the de Rham and Whitney maps | — | `de_rham`, `whitney` |
+| $\omega\in\Omega^k$, $c\in C^k$ | a $k$-form; a $k$-cochain | the field's | physis `fields::Descriptor`, `AnyField`; physis `Cochain`, `CochainField`; the world's `WorldField` |
+| $\mathcal R$, $\mathcal W$ | the de Rham and Whitney maps | — | physis `CochainField` (Whitney's reconstruction on boxes), `transfer` ($\mathcal R'\circ\mathcal W$) |
 | $d$, $\delta$, $\star$, $\Delta$ | coboundary, codifferential, Hodge star, Laplacian | — | physis `d0`, `d1`, `Weights`, `hodge_decomposition` |
 | $\lambda$, $\Omega_m$ | occupancy; the region of material $m$ | — | `Occupancy` |
 | $\mathcal C_\theta$, $\theta$ | a constitutive relation and its parameters | the relation's | `Material`, `Scenario::parameters` |
 | $S$, $L$ | action, Lagrangian density | J s, J m⁻³ | `VariationalModel` |
-| $u$, $J$, $s$ | density, flux, source of a balance law | per volume, per area per time | `BalanceLaw` |
+| $u$, $J$, $s$ | density, flux, source of a balance law | per volume, per area per time | `BalanceLaw`; the first, physis `continuum::HeatConduction` |
 | $(X,F,G,R)$ | a hybrid model | — | physis `Hybrid` |
 | $P_i$, $\Pi_i$, $C_{ij}$ | ports, port spaces, interface relations | — | `Port`, `InterfaceLaw` |
 | $H$, $Q_\Gamma$, $r_\Gamma$ | macro step; transfer through, and residual at, an interface | s; the quantity's | `Schedule`, `Balance` |

@@ -3,7 +3,9 @@
 // fit of a quantity over the cube (its gradient), the value at the centre, arrows of a vector field,
 // the body's figure where it crosses the cube, and the surface of one level. Pure functions of the
 // engine's answer, without three.js, so that they are checked (tests/run-tests.mjs); cube.js draws
-// them.
+// them. What is a volume's and not this cube's (its scales, fit, centre, cells shown and level data) is
+// the shared scene model's (visualization/scene, decision 0007): the cube is its VolumeGrid of n³
+// cells, the engine's cells too.
 //
 // Coordinates. Cell (i, j, k) of n per edge lies at ((i+½)/n − ½, (j+½)/n − ½, (k+½)/n − ½) of the
 // edge along east, north and up; the cells are ordered with i fastest (Fortran order). In the unit
@@ -16,7 +18,10 @@
 // without hue. At night the darkest fifth of the sequential map is left out, and by day its palest,
 // so that every cell stands out from the display's ground.
 
-import { divergingColour, isosurface, sequentialColour } from '../../../visualization/js/index.js';
+import { divergingColour, isosurface, scene as shared, sequentialColour } from '../../../visualization/js/index.js';
+
+// The cube as a volume grid of the scene model: n cells along each of its axes, east, north and up.
+const gridOf = (n, edge = 1) => ({ kind: 'volume', centre: [0, 0, 0], edges: [edge, edge, edge], n: [n, n, n] });
 
 // The position of a cell in the unit cube (three.js's axes: x east, y up, z south).
 export function cellPosition(n, index) {
@@ -26,25 +31,16 @@ export function cellPosition(n, index) {
 
 // The offset of a cell from the cube's centre along east, north and up, in metres.
 export function cellOffset(n, edge, index) {
-  const i = index % n, j = Math.floor(index / n) % n, k = Math.floor(index / (n * n));
-  return [((i + 0.5) / n - 0.5) * edge, ((j + 0.5) / n - 0.5) * edge, ((k + 0.5) / n - 0.5) * edge];
+  const g = gridOf(n, edge);
+  return shared.volumeOffset(g, ...shared.volumeCell(g, index));
 }
 
-// A scale of colour for values: linear, logarithmic (for positive values), or diverging about a value.
+// A scale of colour for values: linear, logarithmic (for positive values), or diverging about a value
+// (the scene model's scales; t in [0, 1], or in [−1, 1] about the value).
 export function scaleOf(values, { log = false, about = null } = {}) {
-  let lo = Infinity, hi = -Infinity;
-  for (const v of values) if (Number.isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
-  if (!(hi >= lo)) return null;
-  if (about !== null && about !== undefined) {
-    const m = Math.max(Math.abs(lo - about), Math.abs(hi - about)) || Math.abs(about) * 1e-9 || 1;
-    return { kind: 'diverging', lo: about - m, hi: about + m, about, t: (v) => (v - about) / m };
-  }
-  if (log && lo > 0 && hi > lo) {
-    const a = Math.log10(lo), s = Math.log10(hi) - a;
-    return { kind: 'log', lo, hi, t: (v) => (Math.log10(Math.max(v, lo)) - a) / s };
-  }
-  const s = hi - lo || 1;
-  return { kind: 'linear', lo, hi, t: (v) => (v - lo) / s };
+  const diverging = about !== null && about !== undefined;
+  const s = shared.scaleOf(values, { kind: diverging ? 'diverging' : log ? 'log' : 'linear', centre: diverging ? about : null });
+  return s && { ...s, lo: s.domain[0], hi: s.domain[1], about: s.centre };
 }
 
 // A value's colour on a scale, [r, g, b] in 0–1, or null where there is no value.
@@ -67,60 +63,17 @@ export function rampCss(scale, night = true) {
 }
 
 // The cells a mode shows: all with a value, the shell, or three slices (indices along E, N, U).
-export function visibleCells(values, n, mode, slices = [0, 0, 0]) {
-  const out = [];
-  for (let idx = 0; idx < n * n * n; idx++) {
-    if (!Number.isFinite(values[idx])) continue;
-    const i = idx % n, j = Math.floor(idx / n) % n, k = Math.floor(idx / (n * n));
-    if (mode === 'shell' && !(i === 0 || j === 0 || k === 0 || i === n - 1 || j === n - 1 || k === n - 1)) continue;
-    if (mode === 'slices' && !(i === slices[0] || j === slices[1] || k === slices[2])) continue;
-    if (mode === 'level') continue;
-    out.push(idx);
-  }
-  return out;
-}
+export const visibleCells = (values, n, mode, slices = [0, 0, 0]) => shared.visibleCells(values, gridOf(n), mode, slices);
 
 // The linear fit of a quantity over the cube, v ≈ a + g · x with x the offset in metres along east,
 // north and up: its gradient g, by least squares over the cells with a value.
 export function gradientOf(values, n, edge) {
-  const M = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]], b = [0, 0, 0, 0];
-  let count = 0;
-  for (let idx = 0; idx < n * n * n; idx++) {
-    const v = values[idx];
-    if (!Number.isFinite(v)) continue;
-    const x = [1, ...cellOffset(n, edge, idx)];
-    for (let p = 0; p < 4; p++) { b[p] += x[p] * v; for (let q = 0; q < 4; q++) M[p][q] += x[p] * x[q]; }
-    count++;
-  }
-  if (count < 8) return null;
-  // Gauss–Jordan on the 4 × 4 normal equations.
-  const A = M.map((row, p) => [...row, b[p]]);
-  for (let c = 0; c < 4; c++) {
-    let piv = c;
-    for (let r = c + 1; r < 4; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
-    if (Math.abs(A[piv][c]) < 1e-30) return null;
-    [A[c], A[piv]] = [A[piv], A[c]];
-    for (let r = 0; r < 4; r++) {
-      if (r === c) continue;
-      const f = A[r][c] / A[c][c];
-      for (let q = c; q < 5; q++) A[r][q] -= f * A[c][q];
-    }
-  }
-  const sol = A.map((row, p) => row[4] / row[p]);
-  return { mean: sol[0], east: sol[1], north: sol[2], up: sol[3] };
+  const fit = shared.gradientOf(values, gridOf(n, edge));
+  return fit && { mean: fit.mean, east: fit.gradient[0], north: fit.gradient[1], up: fit.gradient[2] };
 }
 
 // The value at the cube's centre: the central cell for n odd, the mean of the eight about it else.
-export function centreValue(values, n) {
-  if (n % 2) return values[(n - 1) / 2 * (1 + n + n * n)];
-  const h = n / 2;
-  let s = 0, c = 0;
-  for (const i of [h - 1, h]) for (const j of [h - 1, h]) for (const k of [h - 1, h]) {
-    const v = values[i + n * (j + n * k)];
-    if (Number.isFinite(v)) { s += v; c++; }
-  }
-  return c ? s / c : NaN;
-}
+export const centreValue = (values, n) => shared.centreValue(values, gridOf(n));
 
 // Arrows of a vector field (east, north, up per cell) at every s-th cell, as line segments in the
 // unit cube; their lengths proportional to the vectors', the longest a little under the spacing.
@@ -191,10 +144,7 @@ export function groundGeometry(R, h, edge, steps = 10) {
 // The level surface of a quantity in the unit cube (visualization's surface nets), a cell without a
 // value counted below every level (a finite value, so that the crossings interpolate).
 export function levelSurface(values, n, level) {
-  let lo = Infinity, hi = -Infinity;
-  for (const v of values) if (Number.isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-  const below = lo - (hi - lo || 1);
-  const data = Float32Array.from(values, (v) => (Number.isFinite(v) ? v : below));
+  const data = shared.levelData(values);
   const c = 0.5 / n - 0.5;
   // voxel (i, j, k) → (x, y, z) = (east, up, −north) of the unit cube
   const affine = [1 / n, 0, 0, c, 0, 0, 1 / n, c, 0, -1 / n, 0, -c];

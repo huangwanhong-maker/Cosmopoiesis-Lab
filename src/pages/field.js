@@ -10,9 +10,15 @@
 // cells; a vector quantity draws arrows, of the field or of its departure from the cube's mean; the
 // linear fit over the cube gives the quantity's gradient. A cell the instrument cannot read (outside
 // its coverage, below the ground for the air) is left empty, and the reasons are counted.
+//
+// A field of the world (the engine's fields.hpp: the domains' models as physis's fields) may fill the
+// cube instead of an instrument: read on the same cells, without an instrument's noise or coverage but
+// within the field's own base, its magnitude and its components along the cube's axes for a vector, its
+// value for a scalar. The two are offered side by side, so that an instrument's reading and the field
+// it samples can be set against each other.
 
 import { engine, instruments } from '../api.js';
-import { float32 } from '../fields.js';
+import { float32, worldFields } from '../fields.js';
 import { provenanceTag } from '../busclient.js';
 import { esc, fmt, latText, length, lonText, ttText } from '../format.js';
 import { CubeView, worldCube } from '../cube.js';
@@ -30,14 +36,18 @@ const ARROWS = [['off', 'Off'], ['field', 'Field'], ['departure', 'Departure']];
 const FIRST = {
   'magnetometer.wmm2025': ['total_T', 'linear'], 'magnetometer.moon': ['total_T', 'log'], 'compass.magnetic': ['magnetic_north_deg', 'linear'],
   'atmosphere.ussa1976': ['temperature_K', 'linear'], 'gravimeter.body': ['gravity_m_s2', 'linear'], 'sun.sensor': ['irradiance_w_m2', 'linear'], 'gnss.receiver': ['pdop', 'linear'],
+  'field:earth.magnetic': ['magnitude_T', 'linear'], 'field:earth.magnetic.core': ['magnitude_T', 'linear'], 'field:earth.gravity.normal': ['magnitude_m_s2', 'linear'],
+  'field:moon.magnetic.crust': ['magnitude_T', 'log'], 'field:moon.magnetic.unresolved': ['magnitude_T', 'log'], 'field:moon.magnetic': ['magnitude_T', 'log'],
 };
+// The frame of each body's fields.
+const FRAME_OF = { earth: 'ITRS', moon: 'MOON_ME' };
 // How a unit is shown: tesla as nanotesla, pascal as hectopascal.
 const SHOWN = { T: ['nT', 1e9], Pa: ['hPa', 0.01], 'T/yr': ['nT/yr', 1e9] };
 const shownUnit = (u) => SHOWN[u] || [u, 1];
 const RADIUS = { earth: 6371.0e3, moon: 1737.4e3 };
 
 export function fieldPage(app) {
-  let el, view = null, families = null, answer = null, asking = false, hoverCell = null, sampledAt = null, timer = null;
+  let el, view = null, families = null, fields = [], answer = null, asking = false, hoverCell = null, sampledAt = null, timer = null;
   const state = Object.assign({ centre: 'point', placement: 'auto', families: {}, quantity: null, edge: 1e5, n: 13, mode: 'cells', scale: null, arrows: 'field', fill: 0.55, opacity: 1, slices: null, level: 0.5, world: false },
     (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { return {}; } })());
   if (typeof state.families !== 'object' || !state.families) state.families = {};
@@ -52,7 +62,7 @@ export function fieldPage(app) {
         <div id="fd-where"></div>
         <div class="controls-grid">
           <span>Centre</span>${seg('centre', [['point', 'Point chosen'], ['observer', 'Observer']], state.centre)}
-          <span>Instrument</span><select id="fd-family"><option>…</option></select>
+          <span>Read by</span><select id="fd-family"><option>…</option></select>
           <span>Quantity</span><select id="fd-quantity"><option>…</option></select>
           <span>Edge</span><div class="row" style="margin:0">${seg('edge', EDGES, state.edge)}</div>
           <span>Cells</span><div class="row" style="margin:0">${seg('n', SIZES.map((s) => [s, `${s}³`]), state.n)}${seg('placement', [['auto', 'Auto'], ['centred', 'Centred'], ['above', 'On the ground']], state.placement)}</div>
@@ -107,8 +117,9 @@ export function fieldPage(app) {
         try {
           const c = await instruments();
           families = c.families.filter((f) => KERNELS.has(f.kernel));
+          fields = (await worldFields()).filter((f) => f.available);
         } catch (error) {
-          families = [];
+          families = families || [];
           el.querySelector('#fd-stats').innerHTML = `<p class="error">${esc(error.message)}</p>`;
         }
       }
@@ -142,7 +153,8 @@ export function fieldPage(app) {
       fillFamilies();
       asking = true;
       el.querySelector('#fd-cube').insertAdjacentHTML('beforeend', '<div class="busy"></div>');
-      const request = { op: 'probe_volume', at, time: ttText(app.clock.now()), family, edge_m: state.edge, n: state.n, encoding: 'f32' };
+      const request = { op: 'probe_volume', at, time: ttText(app.clock.now()), edge_m: state.edge, n: state.n, encoding: 'f32',
+        ...(family.startsWith('field:') ? { field: family.slice(6) } : { family }) };
       try {
         const a = await engine(request);
         a.request = request;
@@ -175,7 +187,7 @@ export function fieldPage(app) {
       }
       const n = answer.n, values = q.data;
       const [unit, k] = shownUnit(q.unit);
-      const scaleName = state.scale || FIRST[answer.family]?.[1] || 'linear';
+      const scaleName = state.scale || FIRST[sourceOf(answer)]?.[1] || 'linear';
       const centre = centreValue(values, n);
       const scale = scaleOf(values, { log: scaleName === 'log', about: scaleName === 'about' ? centre : null });
       const night = document.documentElement.dataset.theme !== 'day';
@@ -222,9 +234,12 @@ export function fieldPage(app) {
           <div class="sub">east <span class="n">${perKm(g.east)}</span> · north <span class="n">${perKm(g.north)}</span> · up <span class="n">${perKm(g.up)}</span> ${esc(unit)}/km</div></div>` : ''}
         <div class="reading wide"><div class="what">Cells read</div><div class="v">${fmt(counts.read ?? 0, 0)}<span class="u">of ${fmt(total, 0)}</span></div>
           <div class="sub">${['outside', 'missing', 'invalid'].filter((x) => counts[x]).map((x) => `${fmt(counts[x], 0)} ${x}`).join(' · ') || 'every cell has a reading'} · read in ${fmt((answer.elapsed_s ?? 0) * 1e3, 0)} ms</div></div></div>`;
-      el.querySelector('#fd-reasons').innerHTML = (answer.reasons || []).length ? `<table><tbody>${answer.reasons.slice(0, 4).map((r) => `<tr><th>${fmt(r.count, 0)} cells<small>${esc(r.quality)}</small></th><td class="note">${esc(r.reason)}</td></tr>`).join('')}</tbody></table>` : '';
+      const told = [...(answer.reasons || []).slice(0, 4).map((r) => `<tr><th>${fmt(r.count, 0)} cells<small>${esc(r.quality)}</small></th><td class="note">${esc(r.reason)}</td></tr>`),
+        ...(answer.notes || []).slice(0, 2).map((x) => `<tr><th>${fmt(x.count, 0)} cells<small>read, with a note</small></th><td class="note">${esc(x.note)}</td></tr>`)];
+      el.querySelector('#fd-reasons').innerHTML = told.length ? `<table><tbody>${told.join('')}</tbody></table>` : '';
       el.querySelector('#fd-prov').innerHTML = `${provenanceTag(answer.provenance)} <small>${esc(answer.time?.utc ? `${String(answer.time.utc).replace('T', ' ').slice(0, 19)} UTC` : '')}</small>`;
-      el.querySelector('#fd-about').innerHTML = `${esc(answer.title)}: ${esc(answer.model || '')}. The cube's axes are the local east, north and up at its centre (${esc(c.frame)}); the figure's surface, where it crosses the cube, is drawn in amber. Drag to turn, scroll to zoom, double-click to face south-east.`;
+      const what = answer.field ? `The field ${esc(answer.field)}, ${esc(answer.title)}: ${esc(answer.model || '')}; its base: ${esc(answer.about || '')}.` : `${esc(answer.title)}: ${esc(answer.model || '')}.`;
+      el.querySelector('#fd-about').innerHTML = `${what} The cube's axes are the local east, north and up at its centre (${esc(c.frame)}); the figure's surface, where it crosses the cube, is drawn in amber. Drag to turn, scroll to zoom, double-click to face south-east.`;
       readout();
       page.drawWorld();
     },
@@ -239,24 +254,30 @@ export function fieldPage(app) {
     },
   };
 
-  // The body the cube's centre is on, and the instrument chosen for it (each body remembers its own).
+  // The body the cube's centre is on, and what reads it there (each body remembers its own): an instrument
+  // family, or a field of the world ("field:" and its name) in the body's frame.
   function centreBody() { return state.centre === 'observer' ? app.observerPlace?.body : app.picked?.body; }
+  const sourceOf = (a) => (a?.field ? `field:${a.field}` : a?.family);
+  function fieldsHere() { const frame = FRAME_OF[centreBody()]; return fields.filter((f) => f.frame === frame); }
   function familyFor() {
     const body = centreBody();
     const chosen = (state.families || {})[body || 'any'];
-    if (chosen && (!families || families.some((f) => f.family === chosen))) return chosen;
+    const known = (v) => families.some((f) => f.family === v) || fieldsHere().some((f) => `field:${f.name}` === v);
+    if (chosen && (!families || known(chosen))) return chosen;
     const want = body === 'earth' ? 'magnetometer.wmm2025' : body === 'moon' ? 'magnetometer.moon' : 'gravimeter.body';
     return families?.find((f) => f.family === want)?.family || families?.[0]?.family || want;
   }
   function fillFamilies() {
     const sel = el.querySelector('#fd-family');
     if (!families) return;
-    sel.innerHTML = families.map((f) => `<option value="${esc(f.family)}">${esc(f.title)}</option>`).join('');
+    const here = fieldsHere();
+    sel.innerHTML = `<optgroup label="Instruments">${families.map((f) => `<option value="${esc(f.family)}">${esc(f.title)}</option>`).join('')}</optgroup>`
+      + (here.length ? `<optgroup label="Fields of the world">${here.map((f) => `<option value="field:${esc(f.name)}">${esc(f.name)}: ${esc(f.title)}</option>`).join('')}</optgroup>` : '');
     sel.value = familyFor();
   }
   function quantity() {
     const qs = answer?.quantities || [];
-    return qs.find((q) => q.name === state.quantity) || qs.find((q) => q.name === FIRST[answer.family]?.[0]) || qs[0] || null;
+    return qs.find((q) => q.name === state.quantity) || qs.find((q) => q.name === FIRST[sourceOf(answer)]?.[0]) || qs[0] || null;
   }
   function fillQuantities() {
     const sel = el.querySelector('#fd-quantity');
@@ -264,7 +285,7 @@ export function fieldPage(app) {
     sel.innerHTML = qs.map((q) => `<option value="${esc(q.name)}">${esc(labelOf(q))}${q.unit ? ` (${esc(shownUnit(q.unit)[0])})` : ''}</option>`).join('');
     const q = quantity();
     if (q) sel.value = q.name;
-    for (const b of el.querySelectorAll('[data-seg="scale"] [data-v]')) b.classList.toggle('on', b.dataset.v === (state.scale || FIRST[answer.family]?.[1] || 'linear'));
+    for (const b of el.querySelectorAll('[data-seg="scale"] [data-v]')) b.classList.toggle('on', b.dataset.v === (state.scale || FIRST[sourceOf(answer)]?.[1] || 'linear'));
   }
   function labelOf(q) {
     const name = q.name.replace(/_(T|Pa|K|deg|m_s2|m_s|w_m2|kg_m3|m|s)$/, '').replace(/_/g, ' ');

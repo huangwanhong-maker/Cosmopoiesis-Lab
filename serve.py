@@ -11,13 +11,17 @@ README, §5:
     GET  /api/engine                         whether the engine is built and current, and which sources are in the cache
     POST /api/engine                         a request to the engine: {"op": "status" | "time" | "frames" | "ephemeris"
                                              | "bodies" | "transform" | "holonomy" | "convert" | "address" | "geodesic"
-                                             | "satellites" | "instruments" | "field_lines" | "field_map" | "probe_volume", ...};
+                                             | "satellites" | "instruments" | "fields" | "field.sample" | "field.curves"
+                                             | "field_lines" | "field_map" | "probe_volume" | "mission.start" | "mission.step"
+                                             | "mission.state" | "mission.map" | "mission.stop" | "mission.calibrate", ...};
                                              the server adds the world's sources (and for "satellites" turns "groups"
-                                             into the files of their element sets)
-    POST /api/engine {"op": "probe_volume", "at": address | "observer", "time"?: text, "family", "edge_m", "n",
+                                             into the files of their element sets); a field read without a time (one
+                                             that does not depend on it) is kept, the last few, as the Moon's maps are
+    POST /api/engine {"op": "probe_volume", "at": address | "observer", "time"?: text, "family" | "field", "edge_m", "n",
                       "quantities"?, "settings"?, "encoding"?: "json" | "f32"}
-                                             a family read in the n³ cells of a cube about an event (the engine's
-                                             neighbourhood.hpp); the server puts the observer's address for "observer"
+                                             a family, or a field of the world, read in the n³ cells of a cube about an
+                                             event (the engine's neighbourhood.hpp and fields.hpp); the server puts the
+                                             observer's address for "observer"
                                              and the mission clock's instant where no time is given, and adds what the
                                              acquisition session's world was last told (the satellites' element sets,
                                              the solar wind, the present, the seed), so that the cube reads the world the
@@ -101,11 +105,19 @@ WRITES = {"allowed": True, "token": None}
 LIMITS = {"bytes": 256 * 1024, "samples": 4000, "positions": 10000, "seconds": 60.0, "max_level": {"earth": 18, "moon": 14},
           "probe": {"n": [2, 24], "edge_m": [1.0, 2e7], "threads": min(8, os.cpu_count() or 4)}}
 OPS = {"status", "time", "frames", "ephemeris", "bodies", "transform", "holonomy", "convert", "address", "geodesic", "satellites", "instruments",
-       "field_lines", "field_map", "probe_volume"}
+       "fields", "field.sample", "field.curves", "field_lines", "field_map", "probe_volume",
+       "mission.start", "mission.step", "mission.state", "mission.map", "mission.stop", "mission.calibrate"}
+# The missions' requests that change what every viewer sees: allowed as the clock's and the acquisition's are.
+MISSION_WRITES = {"mission.start", "mission.step", "mission.stop"}
+# A mission's bounds in one request: its clock's step, a map's points a side, a calibration's truths.
+MISSION_LIMITS = {"seconds": 3600.0, "n": 61, "seeds": 24, "calibration_n": 7}
+# The most points a field may be read at in one request, and the most seeds of its curves.
+FIELD_LIMITS = {"points": 1 << 20, "seeds": 512}
 # The engine's instrument families, read from it once, for the declared costs that bound a cube.
 FAMILIES: dict[str, dict] = {}
 SATELLITES = CACHE / "celestrak-gp"
-# The Moon's field maps, which take the engine seconds and do not change: the last few kept.
+# The Moon's field maps, and fields read without a time, which take the engine seconds and do not change:
+# the last few kept.
 FIELD_MAPS: dict[str, dict] = {}
 ACQUISITION = runtime.Acquisition(engine, CLOCK, TERRAIN, SATELLITES, address_engine=ENGINE)
 TILE = re.compile(r"^/tiles/terrain/(earth|moon)/(\d+)/(\d+)/(\d+)$")
@@ -144,8 +156,9 @@ def probe_refusal(body: dict) -> str | None:
     limits = LIMITS["probe"]
     if not isinstance(body.get("at"), str) or not body["at"].strip() or len(body["at"]) > 2000:
         return 'probe_volume: "at" is the centre\'s address, or "observer"; at most 2000 characters'
-    if not isinstance(body.get("family"), str) or not body["family"]:
-        return 'probe_volume: name the instrument family, as "magnetometer.wmm2025"'
+    named = [k for k in ("family", "field") if isinstance(body.get(k), str) and body[k]]
+    if len(named) != 1:
+        return 'probe_volume: name an instrument family, as "magnetometer.wmm2025", or a field of the world, as "earth.magnetic"'
     n, edge = body.get("n"), body.get("edge_m")
     if isinstance(n, float) and n.is_integer():
         n = body["n"] = int(n)
@@ -162,12 +175,34 @@ def probe_refusal(body: dict) -> str | None:
         return "probe_volume: the encoding is json or f32"
     if body.get("time") is not None and not isinstance(body["time"], str):
         return "probe_volume: a time is text, as 2026-10-28T12:00:00Z; without one, the mission clock's instant"
-    family = families().get(body["family"])
+    family = families().get(body.get("family") or "")
     if family:  # an unknown or declared family is refused by the engine, which says why
         seconds = n ** 3 * float(family.get("cost_s", 0.0)) / limits["threads"]
         if seconds > LIMITS["seconds"]:
             return (f"probe_volume: {n}³ cells of {body['family']} at its declared {float(family['cost_s']):g} s a reading, over "
                     f"{limits['threads']} threads, take some {seconds:.0f} s, beyond this server's {LIMITS['seconds']:g} s: ask for fewer cells")
+    return None
+
+
+def mission_refusal(op: str, body: dict) -> str | None:
+    """Why a mission's request is refused, or None."""
+    session = body.get("session", "default")
+    if not isinstance(session, str) or not 0 < len(session) <= 40:
+        return "mission: a session's name, at most 40 characters"
+    try:
+        if op == "mission.step" and not 0 <= float(body.get("seconds", 0)) <= MISSION_LIMITS["seconds"]:
+            return f"mission.step: at most {MISSION_LIMITS['seconds']:.0f} s of the mission's clock a request"
+        if op == "mission.map" and not 3 <= int(body.get("n", 41)) <= MISSION_LIMITS["n"]:
+            return f"mission.map: 3 to {MISSION_LIMITS['n']} points a side"
+        if op == "mission.calibrate":
+            seeds = body.get("seeds", 20)
+            count = len(seeds) if isinstance(seeds, list) else int(seeds)
+            if not 1 <= count <= MISSION_LIMITS["seeds"] or not 3 <= int(body.get("n", 5)) <= MISSION_LIMITS["calibration_n"]:
+                return f"mission.calibrate: 1 to {MISSION_LIMITS['seeds']} truths, 3 to {MISSION_LIMITS['calibration_n']} points a side"
+    except (TypeError, ValueError):
+        return f"{op}: its numbers are numbers"
+    if op in ("mission.start", "mission.calibrate") and not isinstance(body.get("config", {}), dict):
+        return f"{op}: a config, as an object"
     return None
 
 
@@ -178,6 +213,8 @@ def engine_refusal(body: dict) -> str | None:
         return f"unknown op {op!r}: one of {', '.join(sorted(OPS))}"
     if op == "probe_volume":
         return probe_refusal(body)
+    if op.startswith("mission."):
+        return mission_refusal(op, body)
     if op == "address" and (not isinstance(body.get("text"), str) or len(body["text"]) > 2000):
         return "address: the text of an address, at most 2000 characters"
     if op in ("ephemeris", "bodies"):
@@ -187,6 +224,24 @@ def engine_refusal(body: dict) -> str | None:
             return "ephemeris: span and step are numbers of seconds"
         if not step >= 1 or span / step + 1 > LIMITS["samples"]:
             return f"{op}: at most {LIMITS['samples']} samples, a step of at least 1 s"
+    if op in ("field.sample", "field.curves") and (not isinstance(body.get("field"), str) or not body["field"]):
+        return f'{op}: name the field, as "earth.magnetic" (the op "fields" lists them)'
+    if op == "field.sample":
+        g = body.get("sampling")
+        if not isinstance(g, dict):
+            return 'field.sample: the sampling is an object, as {"kind": "sphere", "radius_m", "nlat", "nlon"}'
+        try:
+            kind = g.get("kind")
+            points = (int(g["nlat"]) * int(g["nlon"]) if kind == "sphere" else int(g["nu"]) * int(g["nv"]) if kind == "plane"
+                      else int(g["n"][0]) * int(g["n"][1]) * int(g["n"][2]) if kind == "volume" else len(g["points"]) if kind == "points" else 0)
+        except (KeyError, TypeError, ValueError, IndexError):
+            return "field.sample: the sampling's counts of cells are whole numbers (sphere: nlat, nlon; plane: nu, nv; volume: n; points: points)"
+        if not 0 < points <= FIELD_LIMITS["points"]:
+            return f"field.sample: from 1 to {FIELD_LIMITS['points']} points on this server, not {points}"
+    if op == "field.curves":
+        seeds = body.get("seeds")
+        if not isinstance(seeds, list) or not 0 < len(seeds) <= FIELD_LIMITS["seeds"]:
+            return f"field.curves: seeds are a list of 1 to {FIELD_LIMITS['seeds']} points"
     if op == "field_map":
         try:
             step, degree = float(body.get("step_deg", 1.0)), int(body.get("synthetic_degree", 720))
@@ -292,6 +347,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             refusal = engine_refusal(body)
             if refusal:
                 return self.reply_json({"error": refusal}, 400)
+            if body["op"] in MISSION_WRITES:
+                refusal = write_refusal(self)
+                if refusal:
+                    return self.reply_json({"error": refusal}, 403)
             body.pop("sources", None)  # the world's sources are the server's to name
             body.pop("files", None)    # and so are the files it reads
             if body["op"] == "satellites":
@@ -310,7 +369,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                             threads=LIMITS["probe"]["threads"])
                 if world["seed"] is not None:
                     body["seed"] = world["seed"]
-            if body["op"] == "field_map":
+            if body["op"] in ("field.sample", "field.curves", "field_map") and "seed" not in body:
+                seed = ACQUISITION.seed()
+                if seed is not None:
+                    body["seed"] = seed  # the unresolved scales the session's instruments read
+            if body["op"] == "field_map" or (body["op"] == "field.sample" and not body.get("time")):
                 key = json.dumps(body, sort_keys=True)
                 if key not in FIELD_MAPS:
                     answer = ENGINE.ask(body, timeout=LIMITS["seconds"])

@@ -30,20 +30,42 @@
 //                                                     (navigation/frames/address.hpp); a syntax error says where
 //   {"op": "instruments"}                             the kernels of observation (and their classes), the instrument
 //                                                     families held, and the families declared (declared.hpp)
+//   {"op": "fields"}                                  the world's fields: each one's descriptor (its base, fibre,
+//                                                     representation, provenance and capabilities), or why its
+//                                                     model is not loaded (fields.hpp)
+//   {"op": "field.sample", "field": name, "time"?: text, "sampling": {"kind": "sphere" | "plane" | "volume" |
+//    "points", ...}, "reduce"?: ..., "encoding"?: "json" | "f32", "seed"?: n}
+//                                                     a field read on a sampling, with each point's quality and
+//                                                     the reasons and notes counted (fields.hpp)
+//   {"op": "field.curves", "field": name, "time"?: text, "seeds": [[x, y, z]], "within"?: {...}, ...}
+//                                                     integral curves of a vector field through seeds: field lines
+//                                                     or streamlines, each end with why it ended (fields.hpp)
 //   {"op": "field_lines", "body": "earth", "time": text, "max_radius"?: Earth radii}
-//                                                     lines of the geomagnetic main field (WMM2025) in the ITRS
+//                                                     lines of the geomagnetic main field in the ITRS: the curves of
+//                                                     earth.magnetic.core through 48 seeds
 //   {"op": "field_map", "body": "moon", "height_m"?: h, "step_deg"?: d, "quantity"?: "total" | "radial",
 //    "synthetic"?: bool, "synthetic_degree"?: n, "seed"?: n}
-//                                                     the Moon's crustal field on a grid (lunar.hpp), for drawing
-//   {"op": "probe_volume", "at": address | "observer", "time": text, "family": f, "edge_m": m, "n": 2…24,
+//                                                     the Moon's crustal field on a sphere: moon.magnetic.crust, or
+//                                                     with unresolved scales of a degree and seed, sampled
+//   {"op": "probe_volume", "at": address | "observer", "time": text, "family": f | "field": name, "edge_m": m, "n": 2…24,
 //    "quantities"?: [names], "settings"?: {...}, "encoding"?: "json" | "f32", "session"?: id, "threads"?: k}
-//                                                     a family read in the n³ cells of a cube about an event, in
-//                                                     the body's east, north and up (neighbourhood.hpp): a
-//                                                     session's world, or one told the session's inputs
+//                                                     a family, or a field of the world (fields.hpp), read in the
+//                                                     n³ cells of a cube about an event, in the body's east, north
+//                                                     and up (neighbourhood.hpp): a session's world, or one told
+//                                                     the session's inputs
 //   {"op": "acquire.configure" | "acquire.step" | "acquire.analyse" | "acquire.describe", "session": id, ...}
 //                                                     the acquisition runtime (acquisition.hpp): sensors, servers and
 //                                                     policy; one step of releases, scheduling and dispatch; a
 //                                                     simulation of the declared set under each policy
+//   {"op": "mission.start", "session"?: id, "config": {...}}
+//   {"op": "mission.step", "session"?: id, "seconds": s, "since_track"?: i, "since_readings"?: j, "reveal"?: bool}
+//   {"op": "mission.state" | "mission.stop", "session"?: id, "reveal"?: bool}
+//   {"op": "mission.map", "session"?: id, "half_m"?: m, "n"?: k, "reveal"?: bool, "threads"?: t}
+//   {"op": "mission.run", "config": {...}, "seconds": s, "map"?: {"half_m", "n"}, "reveal"?: bool}
+//   {"op": "mission.calibrate", "config": {...}, "seeds": n | [seeds], "half_m"?: m, "n"?: k, "threads"?: t}
+//                                                     a rover surveying the Moon's crustal field and the mission's
+//                                                     knowledge of it (mission.hpp): started, stepped by its clock,
+//                                                     its state and the posterior's map; run whole in one request
 // Times are text: ISO 8601 with a scale ("2026-10-28T12:00:00Z", "2026-10-28 12:00 TT"), "JD …",
 // "MJD …", or "unix:<seconds>" for UTC from a clock.
 
@@ -69,8 +91,10 @@
 #include "coordinates.hpp"
 #include "declared.hpp"
 #include "environment.hpp"
+#include "fields.hpp"
 #include "lunar.hpp"
 #include "instruments.hpp"
+#include "mission.hpp"
 #include "neighbourhood.hpp"
 #include "satellites.hpp"
 #include "spacetime.hpp"
@@ -179,109 +203,108 @@ std::shared_ptr<const geodesy::geoid::GeoidGrid> geoid_grid(const std::string& p
   return it->second;
 }
 
-// A world for the fields drawn outside any session (field_lines, field_map): its models loaded once.
-World& field_world(Spacetime& s, const Json& sources) {
+// A world for the fields read outside any session (fields, field.sample, field.curves, field_lines,
+// field_map): its geoid and models loaded once, its seed the request's or a new session's.
+World& field_world(Spacetime& s, const Json& r) {
   static std::unique_ptr<World> w;
   static std::string key;
-  const std::string k = sources["wmm"].text() + "|" + sources["moon_magnetic"].text();
-  if (!w || k != key) {
+  static std::uint64_t seed0 = 0;
+  const Json& sources = r["sources"];
+  const std::string k = s.sources().ephemeris + "|" + sources["wmm"].text() + "|" + sources["moon_magnetic"].text() + "|" + sources["geoid"].text();
+  if (!w || k != key || &w->spacetime() != &s) {
     w = std::make_unique<World>(s);
+    w->geoid = geoid_grid(sources["geoid"].text());
     attach_environment_models(*w, sources);
     attach_lunar_model(*w, sources);
     key = k;
+    seed0 = w->seed;
   }
+  w->seed = r["seed"].is_number() ? std::uint64_t(r["seed"].as_number()) : seed0;
   return *w;
 }
 
-// Lines of the geomagnetic main field: from seeds 100 km above the ground at latitudes ±30°, ±50° and
-// ±65° every 45° of longitude, traced both ways along the field's direction (fourth-order Runge–Kutta,
-// steps of 2% of the radius) until they return to the ground or pass `max_radius` Earth radii. The
-// field is the core's (WMM2025), without the magnetosphere's currents: its lines are true near the
-// Earth and only a sketch beyond some four radii, where the solar wind shapes them.
+// The instant of a request reading fields: its time, or, for fields that do not depend on time, J2000.0.
+mt::Instant field_instant(const Spacetime& s, const Json& r, const WorldField& f) {
+  if (r.has("time")) return instant_of(s, r["time"]);
+  if (f.available() && f.descriptor.time != "none") throw std::invalid_argument(f.descriptor.name + " depends on the time: a time is needed");
+  return s.instant(mt::JulianDate{2451545.0, 0.0}, mt::Scale::TT);
+}
+
+// Lines of the geomagnetic field: from seeds 100 km above its reference sphere (6371.2 km) at latitudes
+// ±30°, ±50° and ±65° every 45° of longitude, traced both ways along the field's direction (physis's
+// integral curves: fourth-order Runge–Kutta, steps of 2% of the radius), within the shell from that
+// sphere to `max_radius` Earth radii. The field is the core's (WMM2025 continued outward,
+// earth.magnetic.core), without the magnetosphere's currents: its lines are true near the Earth and only
+// a sketch beyond some four radii, where the solar wind shapes them.
 Json field_lines(World& w, const mt::Instant& t, double max_radius_re) {
-  namespace gm = geophysics::geomagnetism;
-  const auto model = Magnetometer::coefficients(w);
-  if (!model) throw std::invalid_argument("the World Magnetic Model is not in the cache (python data/acquisition/fetch.py noaa-wmm)");
+  const WorldField& core = fields_of(w)["earth.magnetic.core"];
+  if (!core.available()) throw std::invalid_argument(core.missing);
   if (!t.has_utc) throw std::invalid_argument("the model's time is a calendar year (UTC)");
-  const double year = gm::decimal_year(t.utc), R = 6371.2e3, top = max_radius_re * R;
-  const auto dir = [&](const Vec3& x, double sign) {
-    const gm::Field f = gm::field(*model, x, year);
-    const Vec3& b = f.itrs_T;
-    const double n = std::sqrt(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
-    return Vec3{sign * b[0] / n, sign * b[1] / n, sign * b[2] / n};
-  };
-  const auto norm = [](const Vec3& x) { return std::sqrt(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]); };
-  Json lines = Json::array();
+  const double R = 6371.2e3;
+  pf::Shell within;
+  within.inner = R;
+  within.outer = max_radius_re * R;
+  within.below = "inside the model's reference sphere";
+  within.above = "beyond the lines' outer sphere";
+  std::vector<Vec3> seeds;
   for (const double latd : {-65.0, -50.0, -30.0, 30.0, 50.0, 65.0})
     for (int k = 0; k < 8; k++) {
       const double lat = latd * std::numbers::pi / 180, lon = k * std::numbers::pi / 4, r0 = R + 100e3;
-      const Vec3 seed{r0 * std::cos(lat) * std::cos(lon), r0 * std::cos(lat) * std::sin(lon), r0 * std::sin(lat)};
-      std::vector<Vec3> halves[2];
-      for (int side = 0; side < 2; side++) {
-        const double sign = side ? 1.0 : -1.0;
-        Vec3 x = seed;
-        for (int i = 0; i < 4000; i++) {
-          const double r = norm(x);
-          if (i > 0 && (r < R || r > top)) break;
-          halves[side].push_back(x);
-          const double h = 0.02 * r;
-          const Vec3 k1 = dir(x, sign);
-          const Vec3 x2{x[0] + h / 2 * k1[0], x[1] + h / 2 * k1[1], x[2] + h / 2 * k1[2]};
-          const Vec3 k2 = dir(x2, sign);
-          const Vec3 x3{x[0] + h / 2 * k2[0], x[1] + h / 2 * k2[1], x[2] + h / 2 * k2[2]};
-          const Vec3 k3 = dir(x3, sign);
-          const Vec3 x4{x[0] + h * k3[0], x[1] + h * k3[1], x[2] + h * k3[2]};
-          const Vec3 k4 = dir(x4, sign);
-          for (int c = 0; c < 3; c++) x[c] += h / 6 * (k1[c] + 2 * k2[c] + 2 * k3[c] + k4[c]);
-        }
-      }
-      Json line = Json::array();
-      for (auto it = halves[0].rbegin(); it != halves[0].rend(); ++it) line.push(vec(*it));
-      for (std::size_t i = 1; i < halves[1].size(); i++) line.push(vec(halves[1][i]));
-      lines.push(line);
+      seeds.push_back({r0 * std::cos(lat) * std::cos(lon), r0 * std::cos(lat) * std::sin(lon), r0 * std::sin(lat)});
     }
-  return Json::object({{"frame", "ITRS"}, {"lines", lines}, {"decimal_year", year}, {"model", "WMM2025, the core's field to degree 12"},
+  Json lines = Json::array();
+  for (const auto& c : curves_of(core.vector, seeds, tt_seconds(t), pf::CurveOptions{}, &within)) {
+    Json line = Json::array();
+    for (const Vec3& x : c.points) line.push(vec(x));
+    lines.push(line);
+  }
+  return Json::object({{"frame", "ITRS"}, {"lines", lines}, {"decimal_year", geophysics::geomagnetism::decimal_year(t.utc)},
+                       {"model", "WMM2025, the core's field to degree 12, continued outward (earth.magnetic.core)"},
                        {"caveat", "the core's field alone: true near the Earth, a sketch beyond some four Earth radii, where the magnetosphere's currents shape it"}});
 }
 
-// The Moon's crustal field on a grid of latitudes and longitudes (cell centres, rows from the north),
-// its values as numbers or as base64 of float32 (neighbourhood.hpp).
+// The Moon's crustal field on a sphere (cell centres, rows from the north): moon.magnetic.crust, or its
+// sum with the unresolved scales of a degree and a seed; its |B| or radial component, as numbers or as
+// base64 of float32 (neighbourhood.hpp).
 Json field_map(World& w, const Json& r) {
+  namespace pm = planetary_science::magnetism;
   const auto f = lunar_field(w);
   if (!f) throw std::invalid_argument("the Moon's crustal model is not in the cache (python data/acquisition/fetch.py moon-magnetic-t2015)");
-  const double step = std::clamp(r["step_deg"].is_number() ? r["step_deg"].as_number() : 1.0, 0.25, 5.0);
+  const double step_asked = std::clamp(r["step_deg"].is_number() ? r["step_deg"].as_number() : 1.0, 0.25, 5.0);
   const double h = r["height_m"].is_number() ? std::max(0.0, r["height_m"].as_number()) : 0.0;
   const bool radial = r["quantity"].text("total") == "radial";
   const bool synthetic = r["synthetic"].is_bool() && r["synthetic"].as_bool();
-  const int nlat = int(std::lround(180 / step)), nlon = 2 * nlat;
-  std::vector<double> lats(nlat), lons(nlon);
-  const double d = std::numbers::pi / 180;
-  for (int i = 0; i < nlat; i++) lats[i] = (90 - (i + 0.5) * step) * d;
-  for (int j = 0; j < nlon; j++) lons[j] = (-180 + (j + 0.5) * step) * d;
-  physis::analysis::HarmonicPotential p = f->model();
-  int degree = p.degree;
+  const int nlat = int(std::lround(180 / step_asked)), nlon = 2 * nlat;
+  const pm::LunarCrustalField crust(f);
+  const pf::SphereGrid grid{{}, crust.radius() + h, nlat, nlon};
+  int degree = f->model().degree;
+  pf::Samples<Vec3> got;
   if (synthetic) {
     if (!f->law_bounded()) throw std::invalid_argument("the law fitted to the model's spectrum does not fall at high degree, so no small scales are drawn");
     degree = r["synthetic_degree"].is_number() ? std::clamp(int(r["synthetic_degree"].as_number()), 450, 1440) : 720;
     const std::uint64_t seed = r["seed"].is_number() ? std::uint64_t(r["seed"].as_number()) : w.seed;
-    p = p + *f->unresolved(degree, seed);
+    const pm::LunarCrustalField unresolved(f, pm::LunarCrustalField::Part::unresolved, degree, seed);
+    got = pf::sample(pf::sum(WorldFields::composite(crust), crust, unresolved), grid, 0.0);
+  } else {
+    got = pf::sample(crust, grid, 0.0);
   }
-  const auto grid = physis::analysis::field_grid(p, f->model().radius + h, lats, lons);
   // The values as numbers, or (encoding "f32") as base64 of float32, row by row from the north.
   const bool f32 = r["encoding"].text("json") == "f32";
   Json values = Json::array();
   std::vector<float> packed;
   double lo = std::numeric_limits<double>::infinity(), hi = -lo;
-  for (const auto& v : grid) {
-    const double x = radial ? v.radial() : v.total();
+  for (std::size_t k = 0; k < got.size(); k++) {
+    const pf::Query<Vec3> q{0.0, grid.point(k)};
+    const double x = radial ? pf::Radial{}(q, got.values[k]) : pf::Magnitude{}(q, got.values[k]);
     lo = std::min(lo, x), hi = std::max(hi, x);
     if (f32) packed.push_back(float(x));
     else values.push(x);
   }
   static_assert(std::endian::native == std::endian::little, "float32 values are sent little-endian");
   Json out = Json::object({{"body", "moon"}, {"frame", "MOON_ME"}, {"quantity", radial ? "radial" : "total"}, {"units", "T"}, {"height_m", h},
-                       {"step_deg", step}, {"nlat", double(nlat)}, {"nlon", double(nlon)}, {"north_deg", 90.0}, {"west_deg", -180.0},
+                       {"step_deg", 180.0 / nlat}, {"nlat", double(nlat)}, {"nlon", double(nlon)}, {"north_deg", 90.0}, {"west_deg", -180.0},
                        {"min", lo}, {"max", hi}, {"degree", double(degree)}, {"model", f->source()},
+                       {"field", synthetic ? "moon.magnetic" : "moon.magnetic.crust"},
                        {"provenance", synthetic ? "assimilated, with synthetic small scales" : "assimilated"},
                        {"law", law_json(*f)}});
   if (f32) out.set("values_f32", base64(reinterpret_cast<const unsigned char*>(packed.data()), packed.size() * sizeof(float)));
@@ -409,7 +432,67 @@ Json probe_volume_answer(Spacetime& s, const Json& r) {
   } catch (const Unavailable& e) {
     throw std::invalid_argument(std::string("probe_volume: ") + e.what());
   }
-  return probe_volume(*w, registry(), q, centre, canonical, t);
+  return q.field.empty() ? probe_volume(*w, registry(), q, centre, canonical, t) : field_volume(*w, q, centre, canonical, t);
+}
+
+// The missions of a serving engine (mission.hpp), by session; and the crust they survey, read once.
+std::map<std::string, std::unique_ptr<mission::Mission>> missions;
+
+std::shared_ptr<const pm::CrustalField> mission_crust(const Json& sources) {
+  static std::shared_ptr<const pm::CrustalField> crust;
+  static std::string read;
+  const std::string path = sources["moon_magnetic"].text();
+  if (path.empty()) throw std::invalid_argument("mission: the Moon's crustal model is not in the cache (python data/acquisition/fetch.py moon-magnetic-t2015)");
+  if (!crust || path != read) crust = pm::read_lunar_t2015(path), read = path;
+  return crust;
+}
+
+Json mission_answer(const Json& r) {
+  const std::string op = r["op"].text();
+  const std::string id = r["session"].text("default");
+  const bool reveal = r["reveal"].is_bool() && r["reveal"].as_bool();
+  const auto number = [&](const Json& v, double fallback, double lo, double hi) { return v.is_number() ? std::clamp(v.as_number(), lo, hi) : fallback; };
+  const std::size_t threads = std::size_t(number(r["threads"], double(std::max(1u, std::min(8u, std::thread::hardware_concurrency() - 1))), 1, 16));
+  const auto map_of = [&](const mission::Mission& m, const Json& q) {
+    return m.map(number(q["half_m"], 800, 10, 15000), int(number(q["n"], 41, 3, 81)), reveal, threads);
+  };
+  if (op == "mission.run") {
+    mission::Mission m(mission_crust(r["sources"]), mission::Config::from(r["config"]));
+    m.advance(number(r["seconds"], 0, 0, 7 * 86400.0));
+    Json a = m.state(reveal);
+    if (r["map"].is_object()) a.set("map", map_of(m, r["map"]));
+    return a;
+  }
+  if (op == "mission.calibrate") {
+    std::vector<std::uint64_t> seeds;
+    if (r["seeds"].is_array())
+      for (std::size_t i = 0; i < r["seeds"].size(); i++) seeds.push_back(std::uint64_t(r["seeds"][i].as_number()));
+    else
+      for (int i = 1; i <= int(number(r["seeds"], 20, 1, 400)); i++) seeds.push_back(std::uint64_t(i));
+    return mission::calibrate(mission_crust(r["sources"]), mission::Config::from(r["config"]), seeds, number(r["half_m"], 800, 10, 15000),
+                              int(number(r["n"], 5, 3, 81)), threads);
+  }
+  if (op == "mission.start") {
+    auto m = std::make_unique<mission::Mission>(mission_crust(r["sources"]), mission::Config::from(r["config"]));
+    Json a = m->state(reveal);
+    missions[id] = std::move(m);
+    return a;
+  }
+  const auto it = missions.find(id);
+  if (it == missions.end()) throw std::invalid_argument("mission: no mission \"" + id + "\" in this engine; start one (mission.start)");
+  mission::Mission& m = *it->second;
+  const std::size_t since_track = std::size_t(number(r["since_track"], 0, 0, 1e9)), since_readings = std::size_t(number(r["since_readings"], 0, 0, 1e9));
+  if (op == "mission.step") {
+    m.advance(number(r["seconds"], 0, 0, 86400));
+    return m.state(reveal, since_track, since_readings);
+  }
+  if (op == "mission.state") return m.state(reveal, since_track, since_readings);
+  if (op == "mission.map") return map_of(m, r);
+  if (op == "mission.stop") {
+    missions.erase(it);
+    return Json::object({{"stopped", id}});
+  }
+  throw std::invalid_argument("unknown op: " + op);
 }
 
 Json event_json(const navigation::frames::Event& e) {
@@ -560,12 +643,18 @@ Json answer(const Json& r) {
     return Json::object({{"families", fams}, {"kernels", ks}, {"provenance", prov}, {"declared", declared},
                          {"qualities", Json::array({"valid", "outside", "missing", "invalid"})}});
   }
+  if (op == "fields") return fields_answer(fields_of(field_world(s, r)));
+  if (op == "field.sample" || op == "field.curves") {
+    const WorldFields& fs = fields_of(field_world(s, r));
+    const mt::Instant t = field_instant(s, r, fs[r["field"].text()]);
+    return op == "field.sample" ? field_sample(fs, r, t, s) : field_curves(fs, r, t, s);
+  }
   if (op == "field_lines") {
-    World& w = field_world(s, r["sources"]);
+    World& w = field_world(s, r);
     return field_lines(w, instant_of(s, r["time"]), r["max_radius"].is_number() ? std::clamp(r["max_radius"].as_number(), 1.5, 12.0) : 6.0);
   }
   if (op == "field_map") {
-    World& w = field_world(s, r["sources"]);
+    World& w = field_world(s, r);
     return field_map(w, r);
   }
   if (op == "probe_volume") return probe_volume_answer(s, r);
@@ -573,6 +662,7 @@ Json answer(const Json& r) {
   if (op == "acquire.describe") return session_of(s, r).session->describe();
   if (op == "acquire.step") return session_of(s, r).session->step(r);
   if (op == "acquire.analyse") return session_of(s, r).session->analyse(r);
+  if (op.rfind("mission.", 0) == 0) return mission_answer(r);
   if (op == "status") {
     const auto cov = s.catalogue().kernels().spk->coverage();
     Json a = Json::object({{"ephemeris", s.sources().ephemeris}, {"ephemeris_coverage_et", Json::array({cov.first, cov.second})},

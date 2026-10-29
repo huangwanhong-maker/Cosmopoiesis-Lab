@@ -14,41 +14,16 @@
 // z south.
 
 import * as THREE from 'three';
+import { fieldMarks } from '../../../visualization/js/index.js';
 import { cellPosition } from './volume.js';
 
-// A box whose faces are shaded by their direction (the top lightest), so that unlit materials show
-// the cells' form: the colour of a vertex multiplies the cell's colour.
-function shadedBox() {
-  const g = new THREE.BoxGeometry(1, 1, 1);
-  const n = g.attributes.normal, colours = new Float32Array(n.count * 3);
-  for (let v = 0; v < n.count; v++) {
-    const x = n.getX(v), y = n.getY(v), z = n.getZ(v);
-    const s = y > 0.5 ? 1.0 : y < -0.5 ? 0.62 : Math.abs(x) > 0.5 ? 0.8 : z > 0.5 ? 0.9 : 0.72;
-    colours[3 * v] = colours[3 * v + 1] = colours[3 * v + 2] = s;
-  }
-  g.setAttribute('color', new THREE.BufferAttribute(colours, 3));
-  return g;
-}
+const marks = fieldMarks(THREE);
 
-// The cells as one instanced mesh in the unit cube: each a box of `fill` of a cell's size, coloured.
+// The cells as one instanced mesh in the unit cube: each a box of `fill` of a cell's size, coloured (the
+// shared renderer's cells, shaded by the direction of their faces).
 export function cellsMesh(n, cells, colours, { fill = 0.55, opacity = 1 } = {}) {
-  const geometry = shadedBox();
-  const material = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 });
-  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, cells.length));
-  mesh.count = cells.length;
-  const m = new THREE.Matrix4(), c = new THREE.Color();
-  const s = fill / n;
-  cells.forEach((idx, q) => {
-    const [x, y, z] = cellPosition(n, idx);
-    m.makeScale(s, s, s).setPosition(x, y, z);
-    mesh.setMatrixAt(q, m);
-    const rgb = colours[q];
-    mesh.setColorAt(q, c.setRGB(rgb[0], rgb[1], rgb[2], THREE.SRGBColorSpace));
-  });
-  mesh.instanceMatrix.needsUpdate = true;
-  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  const mesh = marks.cells(cells.map((idx) => cellPosition(n, idx)), colours, { size: fill / n, opacity });
   mesh.userData.cells = cells;
-  mesh.frustumCulled = false;
   return mesh;
 }
 
@@ -139,14 +114,7 @@ export class CubeView {
     axes.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0.62, 0, 0, 0, 0, 0, 0, 0.62, 0, 0, 0, 0, 0, 0, -0.62]), 3));
     this.parts.axes = new THREE.LineSegments(axes, new THREE.LineBasicMaterial({ color: ink, transparent: true, opacity: 0.55 }));
     if (spec.cells?.length) this.parts.cells = cellsMesh(spec.n, spec.cells, spec.colours, { fill: spec.fill, opacity: spec.opacity });
-    if (spec.level?.positions?.length) {
-      const g = new THREE.BufferGeometry();
-      g.setAttribute('position', new THREE.BufferAttribute(spec.level.positions, 3));
-      g.setAttribute('normal', new THREE.BufferAttribute(spec.level.normals, 3));
-      g.setIndex(new THREE.BufferAttribute(spec.level.indices, 1));
-      const c = spec.level.colour || [0.85, 0.55, 0.65];
-      this.parts.level = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: new THREE.Color().setRGB(c[0], c[1], c[2], THREE.SRGBColorSpace), side: THREE.DoubleSide, transparent: true, opacity: 0.88 }));
-    }
+    if (spec.level?.positions?.length) this.parts.level = marks.surface(spec.level, spec.level.colour || [0.85, 0.55, 0.65], { opacity: 0.88 });
     if (spec.arrows?.length) {
       const g = new THREE.BufferGeometry();
       g.setAttribute('position', new THREE.BufferAttribute(spec.arrows, 3));

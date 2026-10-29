@@ -13,5 +13,5 @@ A running record, for readers, of what each commit of this work made possible or
 
 | Date | Commits |
 |---|---|
-| [2026-10-29](2026-10-29.md) | The world first, and the field about a point; fields known in part, a compass with its coverage, declared instruments, and the kernel asked |
+| [2026-10-29](2026-10-29.md) | The world's fields and their drawing; a body that senses, and a mission that learns; the world first, and the field about a point; fields known in part, a compass with its coverage, declared instruments, and the kernel asked |
 | [2026-10-28](2026-10-28.md) | One world, its addresses and its instruments; the founding of Cosmopoiesis: its formalism, its architecture, its guide |
