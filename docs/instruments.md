@@ -71,8 +71,8 @@ Each family of the encyclopedia is given its kernel or kernels, what it reads in
 | B06 | Turbulence and mixing | point probe at a high rate; estimator | a region · fluctuations; fluxes estimated over a window | planned |
 | B07 | Acoustic pressure and sound | point probe | a region · the acoustic pressure of a wave field | planned |
 | B08 | Active acoustics | ranging | a region · sound speed and scatterers | planned |
-| B09 | Elastic waves and vibration | point probe | a solid region · ground velocity | planned: geophysics' sections |
-| B10 | Density and rheology | point probe; protocol | a region · density, viscosity | the density of `atmosphere.ussa1976` |
+| B09 | Elastic waves and vibration | point probe; footprint | a solid region · ground velocity; the speeds of elastic waves | `seismic_column.crust1`, the speeds of P and S waves beneath the mount, CRUST1.0 over PREM (model); a section through the Earth along a geodesic (`beneath.section`) |
+| B10 | Density and rheology | point probe; protocol | a region · density, viscosity | the density of `atmosphere.ussa1976`; the interior's in `seismic_column.crust1` (model) |
 
 ### 3.3 C. Electromagnetism, Optics and Radiation
 

@@ -191,6 +191,7 @@ One JSON request on the standard input, one JSON answer on the standard output, 
 | `{"op": "fields"}`, `{"op": "field.sample", …}`, `{"op": "field.curves", …}` | the world's fields, each one of physis's fields of a domain's model bound to this world (`engine/fields.hpp`): their descriptors; a field read on a sphere, a plane, a volume or points, reduced if asked, each point's quality and reason; the integral curves of a vector field (decision 0007) |
 | `{"op": "field_lines" \| "field_map", …}` | the Earth's field lines (the curves of `earth.magnetic.core`); the Moon's crustal field on a sphere, with its finer scales when asked (decisions 0005, 0007) |
 | `{"op": "probe_volume", "at", "family" \| "field", "edge_m", "n", …}` | an instrument whose reading depends on its place, or a field of the world, read over a cube about an event in the live session's world, its axes east, north and up at its centre (physis's volume grid): each quantity per cell, the vector in the cube's axes, the reasons where it cannot read (decisions 0006, 0007) |
+| `{"op": "beneath.section", …}` | the Earth beneath a place cut along a geodesic (`engine/beneath.hpp`, decision 0010): its samples, CRUST1.0's columns, PREM's shells, the events beside it placed along and across; the seismic column is an instrument (`seismic_column.crust1`), the interior three fields of the world |
 
 With `--serve` the engine reads a request per line and keeps what it has read between them; the server keeps it so for the spacetime's operations, and will still run `run` as a job of its own process.
 
@@ -277,7 +278,9 @@ A console laid out as a flight deck (decision [0003](../development/decisions/00
   - the frame;
   - the instruments' mounts.
 - **Two decks.** The science deck holds the point, the environment, the field about a point and the instruments' readings. The engineering deck holds the frames, the bus, the scheduling and the engine.
-- **Type.** One family of three: Source Serif 4 for the name and prose, Source Sans 3 with tabular figures for everything read at a glance, and Source Code Pro for addresses and identifiers. Readings are 22–26 px, and nothing is under 12 px.
+- **Type** (since decision [0009](../development/decisions/0009-a-precision-console-and-figures-that-separate.md)). One engineered family, IBM Plex: Plex Sans Condensed for labels, headings and keys, Plex Sans with tabular figures for what is read, Plex Mono for clocks, addresses and identifiers. Readings are light, 25–29 px; labels are capitals of 10.5 px; nothing else is under 11 px.
+- **The look** (decision 0009). A precision instrument: square panes of glass with a tick of rose at each corner, keys that are outlines until chosen (then lit, with a notch), choices of one joined in a row, square lamps and indicators, diamonds for a choice of one, a hairline slider; glow only for what is lit.
+- **Figures that separate** (decision 0009, `src/separate.js`). A figure is moved into a window of its own over the world, keeping its state and updates; the window is dragged, resized, enlarged to the stage between the displays and docked back, and is placed beside the display it left.
 - **Themes.** Day and night. Its colours are **pink and purple**, the user's: rose (#EE8FBD) and orchid (#B892DD) on a plum night, a deeper rose (#C2477F) and orchid (#7D54AB) on lilac paper by day; its data in colours validated for colour vision deficiencies, the provenance of readings in three hues with glyphs, the status colours reserved.
 
 ### 7.4 The Server

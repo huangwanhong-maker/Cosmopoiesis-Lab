@@ -11,10 +11,12 @@
 // session in the engine (tests/check_runtime.py: the mission clock's time scales and commands, the
 // bus, releases and skips, the instruments' readings, a session's determinism, the policies); and the
 // world's fields (decision 0007): their catalogue, a field read on a sampling and its curves, held to
-// NOAA's test values, the old operations' answers, the field equations and a family's own cube; and a
+// NOAA's test values, the old operations' answers, the field equations and a family's own cube; a
 // mission (decision 0008): the page's arithmetic of its map, and the engine's rover surveying the Moon's
 // crust at both fidelities and by both plans, the truth hidden until revealed, and the knowledge's
-// calibration over many truths.
+// calibration over many truths; and the world beneath (decision 0010): the section's geometry as the
+// page draws it, the engine's section with its events placed along and across, and the interior as
+// fields, held to PREM as ObsPy tabulates it.
 // The science itself is checked by the domains metrology, geodesy, astronomy, geophysics,
 // meteorology and navigation and by physis and calx; the drawing by the shared visualization layer.
 // Run from the repository root:  node applications/cosmopoiesis-lab/tests/run-tests.mjs
@@ -35,6 +37,8 @@ import { primary } from '../src/readings.js';
 import { nearestPlace } from '../src/pages/point.js';
 import { analysisHtml } from '../src/pages/sched.js';
 import { QUANTITIES, emptyMission, groupRange, merge, offsetMetres, project, rasterise, unproject, valueAt, whitenedBand } from '../src/mission.js';
+import { besidePlacement, clampPlacement } from '../src/separate.js';
+import { compass, materialAt, nearestSample, projection, sectionLegend, viewRange } from '../src/beneath.js';
 
 const { assert, check, skip, done } = suite();
 const APP = resolve(ROOT, 'applications/cosmopoiesis-lab');
@@ -169,6 +173,66 @@ assert('navigator: from the Earth the camera may stand beyond the Moon\'s orbit'
 assert('provenance: five classes of reading, an unknown one read as a model',
   ['physical', 'archive', 'model', 'synthetic', 'assimilated', 'guess'].map(provenanceClass).join() === 'observed,archive,model,synthetic,assimilated,model');
 
+// ---- a figure in a window of its own (src/separate.js, decision 0009) ------------------------------------------
+{
+  const W = 1400, H = 900, room = { left: 404, right: 840 };
+  const p = clampPlacement({ x: 5000, y: -40, w: 3000, h: 100 }, W, H);
+  assert('separate: a window dragged off the screen keeps its bar reachable and its size within the screen', p.x <= W - 120 && p.y >= 8 && p.w <= W - 16 && p.h >= 180, JSON.stringify(p));
+  const scrolled = { left: 850, right: 1390, top: 1100 };
+  const first = besidePlacement(scrolled, W, H, { room });
+  assert('separate: a figure scrolled out of sight opens within the free height, between the displays',
+    first.y >= 120 && first.y + first.h <= H - 130 && first.x >= room.left && first.x + first.w <= room.right, JSON.stringify(first));
+  const ys = [0, 1, 2].map((n) => besidePlacement(scrolled, W, H, { room, n }).y);
+  assert('separate: windows opened one after another do not hide one another', new Set(ys).size === 3, ys.join());
+  assert("separate: a figure of the left display opens on the world's side of it", besidePlacement({ left: 10, right: 394, top: 200 }, W, H).x >= 394);
+}
+
+// ---- the world beneath, as the page draws it (src/beneath.js, decision 0010) -----------------------------------
+{
+  // A constructed section: five samples 10 km apart, the first two at sea over one cell, the rest on land
+  // over another; CRUST1.0's columns (index, top, bottom, density, vp, vs) and PREM's lid below.
+  const sec = {
+    body: 'earth', half_m: 20e3, step_m: 10e3, azimuth_deg: 90, points: { s_m: [-20e3, -10e3, 0, 10e3, 20e3] }, cells: [1, 1, 2, 2, 2], deepest_moho_m: 30e3,
+    terrain: { height_m: [-3000, -2000, 400, 900, 300], sea: [true, true, false, false, false] },
+    columns: {
+      1: { surface_m: 0, solid_m: -2500, moho_depth_m: 12e3, layers: [[0, 0, -2500, 1020, 1500, 0], [2, -2500, -3000, 2000, 2000, 800], [5, -3000, -12e3, 2900, 6600, 3700]] },
+      2: { surface_m: 500, solid_m: 500, moho_depth_m: 30e3, layers: [[5, 500, -15e3, 2700, 6000, 3500], [7, -15e3, -30e3, 2950, 7000, 3950]] },
+    },
+    prem: [{ name: 'lid', region: 'upper mantle', top_m: 0, bottom_m: 80e3, density_top_kg_m3: 3380, density_bottom_kg_m3: 3375, vp_top_m_s: 8120, vp_bottom_m_s: 8076, vs_top_m_s: 4500, vs_bottom_m_s: 4470 }],
+  };
+  const at = (i, z) => materialAt(sec, i, z)?.what ?? 'the air';
+  assert('beneath: at sea, the sea down to the terrain\'s floor; the cell\'s first solid layer reaching up to a floor above its top, cut by a floor below it',
+    at(1, -1000) === 'the sea' && at(1, -2100) === 'upper sediments' && at(0, -2900) === 'the sea' && at(0, -3100) === 'upper crystalline crust',
+    [at(1, -1000), at(1, -2100), at(0, -2900), at(0, -3100)].join(', '));
+  assert('beneath: on land, the air above the terrain; the first solid layer reaching up to ground above its cell\'s top; PREM below the Moho',
+    at(3, 950) === 'the air' && at(3, 700) === 'upper crystalline crust' && at(3, -20e3) === 'lower crystalline crust' && at(3, -40e3) === 'lid (upper mantle)',
+    [at(3, 950), at(3, 700), at(3, -20e3), at(3, -40e3)].join(', '));
+  check('beneath: PREM interpolated within its shell', materialAt(sec, 3, -40e3).density - (3380 + (3375 - 3380) * 0.5), 1e-9, 'kg/m³');
+  assert('beneath: the sample nearest a distance, the ends held', nearestSample(sec, 4e3) === 2 && nearestSample(sec, -1e9) === 0 && nearestSample(sec, 1e9) === 4);
+  const [top, bottom] = viewRange(sec, 'crust');
+  assert('beneath: the crust view from above the highest ground to 15 km below the deepest Moho, in 5 km', top > 900 && bottom === -45e3, `${top}, ${bottom}`);
+  for (const view of ['crust', 'mantle']) {
+    const P = projection(sec, view, 380, 260);
+    let worst = 0;
+    for (const [s, z] of [[-20e3, 0], [0, -30e3], [15e3, -2e3], [20e3, -40e3]]) {
+      const [x, y] = P.pt(s, z), [s2, z2] = P.inverse(x, y);
+      worst = Math.max(worst, Math.abs(s2 - s), Math.abs(z2 - z));
+    }
+    check(`beneath: the ${view} view's projection and its inverse (${P.curved ? 'the slice at true scale' : 'flat'})`, worst, 1e-6, 'm');
+  }
+  const P = projection(sec, 'mantle', 380, 260);
+  const [xl, yl] = P.pt(-20e3, 0), [xc, yc] = P.pt(0, 0), [xr, yr] = P.pt(20e3, 0);
+  check('beneath: the slice is at true scale: 1 km across is 1 km down', Math.hypot(...P.pt(0, -1e3).map((v, k) => v - [xc, yc][k])) / Math.hypot(...P.pt(1e3, 0).map((v, k) => v - [xc, yc][k])) - 1, 1e-4);
+  assert('beneath: its surface bows up toward the centre (the Earth\'s curvature)', yc < yl && yc < yr && Math.abs(yl - yr) < 1e-9 && xl < xc && xc < xr);
+  const moon = { body: 'moon', points: sec.points, terrain: { height_m: [0, 0, 0, 0, 0], sea: [false, false, false, false, false] }, events: [] };
+  assert('beneath: the legend names only what is drawn: the sea and earthquakes on the Earth, neither on the Moon',
+    /the sea/.test(sectionLegend({ ...sec, events: [[2, 0, 1e3]] }, { swath_m: 75e3 })) && /earthquakes/.test(sectionLegend({ ...sec, events: [[2, 0, 1e3]] }, { swath_m: 75e3 }))
+    && !/the sea|earthquakes|rock/.test(sectionLegend(moon)));
+  assert('beneath: the compass of an azimuth', compass(0) === 'N' && compass(90) === 'E' && compass(270) === 'W' && compass(135) === 'SE' && compass(-90) === 'W');
+  const big = besidePlacement({ left: 1010, right: 1390, top: 500 }, 1400, 900, { room: { left: 404, right: 996 }, w: 760, h: 620 });
+  assert('separate: a figure that asks for a larger first window has it, within the stage', big.w === 592 && big.h === 620 && big.x === 404, JSON.stringify(big));
+}
+
 // ---- the field's cube, as the page reckons it (decision 0006) --------------------------------------------------
 {
   const n = 7, L = 7000, N3 = n * n * n;
@@ -219,6 +283,11 @@ assert('provenance: five classes of reading, an unknown one read as a model',
 {
   const p = primary({ family: 'magnetometer.wmm2025', available: true, values: { total_T: 4.91284e-5, north_T: 1.9561e-5, east_T: 4.3e-7, down_T: 4.5063e-5, declination_deg: 1.26, inclination_deg: 66.53 } });
   assert('readings: a magnetometer is read first as |B| in nanotesla', p.value === '49,128' && p.unit === 'nT', `${p.value} ${p.unit}`);
+  const col = primary({ family: 'seismic_column.crust1', available: true, values: { surface_m: 90, solid_m: 90, moho_depth_m: 35690, crust_m: 35780, water_m: 0, oceanic: false, mantle: { vp_m_s: 8010, vs_m_s: 4450, density_kg_m3: 3360 } } });
+  assert('readings: the seismic column reads its crust, not the height of its cell', col.value === '35.8' && col.unit === 'km of crust' && col.parts.some(([l, t]) => l === 'Pn' && t === '8.01 km/s'), JSON.stringify(col));
+  assert('readings: a value that rounds to zero at the digits shown is zero, not its residue in powers of ten',
+    primary({ family: 'gravimeter.body', available: true, values: { gravity_m_s2: 9.81201, deflection_deg: -2.71e-11 / 3600, model: 'normal gravity' } }).parts[0][1] === '0″'
+    && primary({ family: 'gravimeter.body', available: true, values: { gravity_m_s2: 9.8, deflection_deg: 3.2 / 3600, model: 'm' } }).parts[0][1] === '3.2″');
   assert('readings: an unknown family shows its first numbers', primary({ family: 'x', available: true, values: { speed_m_s: 12.5, note: 'a' }, units: { speed_m_s: 'm/s' } }).unit === 'm/s');
   assert('readings: no reading where the instrument cannot read', primary({ family: 'magnetometer.wmm2025', available: false, reason: 'outside' }) === null);
   const gz = new Gazetteer();
@@ -357,6 +426,8 @@ if (!state || !state.built || !state.data.ephemeris) {
     declared.length === 101 && classes.size === 12 && declared.every((d) => classes.has(d.class)), `${declared.length} declared, ${classes.size} classes`);
   assert('instruments: a declared family with a model names the engine\'s families that carry it',
     declared.filter((d) => d.implemented).length >= 20 && declared.find((d) => d.code === 'C01')?.engine_families?.includes('magnetometer.moon'));
+  assert('instruments: the seismic column is a footprint of the engine, the encyclopedia\'s elastic waves (B09), now written',
+    (ins.families || []).find((f) => f.family === 'seismic_column.crust1')?.kernel === 'footprint' && declared.find((d) => d.code === 'B09')?.implemented === true);
 
   // ---- the fields: the Earth's field lines, the Moon's crustal field -----------------------------------------------
   const fl = ask({ op: 'field_lines', body: 'earth', time: '2026-10-28T12:00:00Z' });
@@ -505,8 +576,9 @@ if (!state || !state.built || !state.data.ephemeris) {
     const cat = ask({ op: 'fields' }).fields || [];
     const byName = new Map(cat.map((f) => [f.name, f]));
     const names = ['earth.magnetic', 'earth.magnetic.core', 'earth.gravity.normal', 'earth.atmosphere.temperature', 'earth.atmosphere.pressure',
-      'earth.atmosphere.density', 'earth.atmosphere.speed_of_sound', 'moon.magnetic.crust', 'moon.magnetic.unresolved', 'moon.magnetic'];
-    assert('fields: the world holds ten fields, the domains\' models, each with its descriptor', names.every((n) => byName.has(n)) && cat.length === 10, cat.map((f) => f.name).join(', '));
+      'earth.atmosphere.density', 'earth.atmosphere.speed_of_sound', 'earth.interior.density', 'earth.interior.vp', 'earth.interior.vs',
+      'moon.magnetic.crust', 'moon.magnetic.unresolved', 'moon.magnetic'];
+    assert('fields: the world holds thirteen fields, the domains\' models, each with its descriptor', names.every((n) => byName.has(n)) && cat.length === 13, cat.map((f) => f.name).join(', '));
     const moonField = byName.get('moon.magnetic');
     assert('fields: the Moon\'s composite is synthetic, its parts the assimilated model and the synthetic scales, read on spheres row by row',
       !moonField?.available || (moonField.provenance === 'synthetic' && moonField.parts?.map((x) => `${x.name}:${x.provenance}`).join() === 'moon.magnetic.crust:assimilated,moon.magnetic.unresolved:synthetic'
@@ -612,6 +684,47 @@ if (!state || !state.built || !state.data.ephemeris) {
     }
   }
 
+  // ---- the world beneath (decision 0010): a section, its events, the interior as fields ------------------------
+  {
+    const geo = ask({ op: 'geodesic', from: { latitude_deg: 38.3, longitude_deg: 143 }, to: { latitude_deg: 38.3, longitude_deg: 145 } });
+    const sec = ask({ op: 'beneath.section', body: 'earth', latitude_deg: 38.3, longitude_deg: 143, azimuth_deg: 90, half_m: 500e3, step_m: 5e3, swath_m: 50e3,
+      events: [[38.3, 143, 30e3, 7], [38.3, 145, 10e3, 6], [10, 10, 10e3, 5]] });
+    const S = sec.points?.s_m || [];
+    assert('beneath.section: 201 samples from −500 to +500 km, the centre the place itself, heading east there',
+      S.length === 201 && S[0] === -500e3 && S[200] === 500e3 && sec.points.latitude_deg[100] === 38.3 && sec.points.longitude_deg[100] === 143 && sec.points.azimuth_deg[100] === 90,
+      sec.error || `${S.length}`);
+    const e = new Map((sec.events || []).map((x) => [x[0], x]));
+    assert('beneath.section: an event at the centre lies on it; one on the far side of the Earth is left out', e.has(0) && Math.abs(e.get(0)[1]) < 1e-6 && Math.abs(e.get(0)[2]) < 1e-6 && !e.has(2));
+    const p = e.get(1);
+    // On the parallel 175 km east the place lies left of the geodesic, which bends south of the parallel.
+    check('beneath.section: one 2° east on the parallel, along and across making its geodesic distance (right triangle, to the flattening\'s order)',
+      p ? Math.hypot(p[1], p[2]) - geo.distance_m : 1e9, 5, 'm');
+    assert('beneath.section: and to the left of the line, northward', p && p[2] < 0 && p[2] > -5e3, p && `${p[2]} m`);
+    if (existsSync(resolve(CACHE, 'products/crust-crust1.bin'))) {
+      const cols = Object.values(sec.columns || {});
+      assert('beneath.section: each sample in a cell of CRUST1.0, the cells\' columns given once, PREM\'s ten shells of the mantle and core beneath',
+        sec.cells?.length === 201 && cols.length > 3 && cols.length < 15 && sec.prem?.length === 10 && sec.prem[0].top_m === 0 && sec.prem[9].bottom_m === 6371e3,
+        `${cols.length} cells, ${sec.prem?.length} shells`);
+      assert('beneath.section: every column joined from its top to its Moho', cols.every((c) => c.layers.every((l, i) => i === 0 || l[1] === c.layers[i - 1][2]) && c.layers.at(-1)[2] === -c.moho_depth_m));
+      const cat = ask({ op: 'fields' }).fields || [];
+      assert('fields: the interior\'s density and the speeds of P and S waves, CRUST1.0 over PREM, of the model',
+        ['earth.interior.density', 'earth.interior.vp', 'earth.interior.vs'].every((n) => cat.find((f) => f.name === n)?.available && cat.find((f) => f.name === n)?.provenance === 'model'));
+      // PREM as ObsPy tabulates it (the geophysics domain's fixture), between its rows at 2971 and 3071 km.
+      const rows = readFileSync(resolve(ROOT, 'domains/geophysics/tests/fixtures/prem-obspy.txt'), 'utf8').split('\n').filter((l) => l && !l.startsWith('#')).map((l) => l.split(/\s+/).map(Number));
+      const [a, b] = [rows.find((r) => r[0] === 2971), rows.find((r) => r[0] === 3071)];
+      const x = 6378137 - 3000e3;
+      const deep = ask({ op: 'field.sample', field: 'earth.interior.density', sampling: { kind: 'points', points: [[x, 0, 0], [6378137 + 10e3, 0, 0]] } });
+      const v = deep.values?.[0], depth = 3000e3 + (deep.values ? 0 : 0);
+      const expected = (a[3] + ((b[3] - a[3]) * (3000 - 2971)) / 100) * 1e3;
+      check('field.sample: the outer core\'s density 3000 km beneath the equator, against ObsPy\'s PREM (the geoid\'s 17 m and the rows\' spacing within 3 kg/m³)', (v ?? 0) - expected, 3, 'kg/m³');
+      assert('field.sample: 10 km above the ground the interior is refused: in the air', deep.quality?.[1] === 1 && /in the air/.test(deep.reasons?.[0]?.text || ''), JSON.stringify(deep.reasons));
+    } else {
+      skip('beneath: CRUST1.0 is not in the cache (python data/acquisition/fetch.py crust1; python data/products/crust_model.py)');
+    }
+    const moon = ask({ op: 'beneath.section', body: 'moon', latitude_deg: 7.5, longitude_deg: -59, azimuth_deg: 0, half_m: 100e3, step_m: 1e3 });
+    assert('beneath.section: on the Moon, the section\'s points and no interior, and why', moon.points?.s_m?.length === 201 && !moon.columns && /Moon's interior/.test(moon.missing || ''), moon.error || moon.missing);
+  }
+
   // ---- coordinates: the top of the Eiffel Tower ----------------------------------------------------------
   const eiffel = { system: 'geodetic', latitude_deg: 48.8584, longitude_deg: 2.2945, height_m: 330 };
   const c = ask({ op: 'convert', time: '2026-10-28T12:00:00Z', point: eiffel, observer: { latitude_deg: 48.8606, longitude_deg: 2.3376, height_m: 35 } });
@@ -675,12 +788,21 @@ if (state && state.built && state.data.ephemeris && state.data.moon_magnetic) {
       !run.truth && run.readings.every((r) => !r.truth_ned_nT) && !run.map.truth_total_nT && !run.map.calibration);
     assert('mission: where it has read, the field is known far better than before', Math.min(...run.map.sd_down_nT) < 0.1 * run.map.prior_sd_down_nT,
       `${Math.min(...run.map.sd_down_nT)} against ${run.map.prior_sd_down_nT} nT`);
+    // what the graph along the track draws: each reading at its distance driven, beside what T2015_449 said there
+    const rs = run.readings, steps = rs.slice(1).map((r, i) => r.driven_m - rs[i].driven_m);
+    assert('mission: the readings carry the distance driven, from 0 m, one interval (10 m) apart',
+      rs[0].driven_m === 0 && steps.every((d) => Math.abs(d - 10) < 0.5), `${rs[0].driven_m} m, steps ${Math.min(...steps)}–${Math.max(...steps)} m`);
+    check('mission: and the prior there, |B| of T2015_449 its magnitude (largest relative difference)',
+      Math.max(...rs.map((r) => Math.abs(Math.hypot(...r.prior_ned_nT) / r.prior_total_nT - 1))), 1e-12);
+    assert("mission: hidden, no reading carries the truth's |B|", rs.every((r) => r.truth_total_nT === undefined));
   }
   const shown = ask({ op: 'mission.run', config: short, seconds: 20000, map: { half_m: 500, n: 11 }, reveal: true });
   if (!shown.error) {
     const c = shown.map.calibration;
     assert('mission: revealed, the posterior\'s error of |B| is below the prior\'s (T2015_449 alone)', c.rms_error_total_nT < 0.5 * c.rms_error_prior_total_nT, `${c.rms_error_total_nT} against ${c.rms_error_prior_total_nT} nT`);
     assert('mission: and the readings carry the truth they read', shown.readings.every((r) => Array.isArray(r.truth_ned_nT)) && shown.truth?.degree === 1440);
+    check('mission: and its |B|, the magnitude of the truth read (largest relative difference)',
+      Math.max(...shown.readings.map((r) => Math.abs(Math.hypot(...r.truth_ned_nT) / r.truth_total_nT - 1))), 1e-12);
     const r0 = shown.readings[3];
     const noise = Math.hypot(...r0.ned_nT.map((v, i) => v - r0.truth_ned_nT[i]));
     assert('mission: a reading is the truth with noise of 0.5 nT a component (within 5 sd of its magnitude)', noise < 5 * 0.5 * Math.sqrt(3), `${noise} nT`);

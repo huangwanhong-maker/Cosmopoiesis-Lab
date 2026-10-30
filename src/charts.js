@@ -45,6 +45,62 @@ const ticks = (a, b, n = 5) => {
   return out;
 };
 
+// Values along a track against the distance driven (x, m): one axis, readings as points and models as lines,
+// a crosshair and its tooltip on hover. spec: { x: [], series: [{ label, kind: 'points' | 'line', colour, dash?,
+// values: [] }], unit, xUnit, title, size? }; with a size (px) the graph is drawn at it, its text at its own size.
+export function alongTrack(el, spec) {
+  const W = spec.size ? Math.round(spec.size.w) : 380, H = spec.size ? Math.round(spec.size.h) - 4 : 210, L = 44, R = 10, T = 22, B = 28;
+  const s = svg(el, W, H);
+  const xs = spec.x;
+  const all = spec.series.flatMap((x) => x.values).filter(Number.isFinite);
+  let y0 = Math.min(...all), y1 = Math.max(...all);
+  if (y1 - y0 < 1e-9) { y0 -= 1; y1 += 1; }
+  const pad = (y1 - y0) * 0.08;
+  y0 -= pad; y1 += pad;
+  const x0 = Math.min(...xs), x1 = Math.max(...xs) > x0 ? Math.max(...xs) : x0 + 1;
+  const X = (v) => L + ((v - x0) / (x1 - x0)) * (W - L - R);
+  const Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+  node(s, 'text', { x: L, y: 13, class: 'title' }, `${spec.title}, ${spec.unit}`);
+  for (const v of ticks(y0, y1, 4)) {
+    node(s, 'line', { x1: L, x2: W - R, y1: Y(v), y2: Y(v), class: 'grid' });
+    node(s, 'text', { x: L - 6, y: Y(v) + 3.5, 'text-anchor': 'end' }, fmt(v, Math.abs(y1 - y0) < 6 ? 1 : 0));
+  }
+  // the ticks of distance, leaving the axis's end to its unit
+  for (const v of ticks(x0, x1, 5)) if (X(v) < W - R - 30) node(s, 'text', { x: X(v), y: H - 10, 'text-anchor': 'middle' }, `${fmt(v, 0)}`);
+  node(s, 'text', { x: W - R, y: H - 10, 'text-anchor': 'end' }, spec.xUnit);
+  node(s, 'line', { x1: L, x2: W - R, y1: H - B, y2: H - B, class: 'axis' });
+  for (const x of spec.series) {
+    if (x.kind === 'line') {
+      const d = x.values.map((v, i) => `${i ? 'L' : 'M'}${X(xs[i]).toFixed(1)},${Y(v).toFixed(1)}`).join('');
+      node(s, 'path', { d, class: 'line', stroke: x.colour, 'stroke-width': 1.6, ...(x.dash ? { 'stroke-dasharray': x.dash } : {}) });
+    }
+  }
+  for (const x of spec.series) {
+    if (x.kind !== 'points') continue;
+    const g = node(s, 'g', { fill: x.colour });
+    x.values.forEach((v, i) => node(g, 'circle', { cx: X(xs[i]).toFixed(1), cy: Y(v).toFixed(1), r: 1.9 }));
+  }
+  const cross = node(s, 'line', { x1: 0, x2: 0, y1: T, y2: H - B, class: 'mark-line', visibility: 'hidden' });
+  const hit = node(s, 'rect', { x: L, y: T, width: W - L - R, height: H - T - B, class: 'hit' });
+  const nearest = (e) => {
+    const r = s.getBoundingClientRect();
+    const vx = x0 + (((e.clientX - r.left) / r.width) * W - L) / (W - L - R) * (x1 - x0);
+    let k = 0;
+    for (let i = 1; i < xs.length; i++) if (Math.abs(xs[i] - vx) < Math.abs(xs[k] - vx)) k = i;
+    return k;
+  };
+  hover(hit, (e) => {
+    const k = nearest(e);
+    cross.setAttribute('x1', X(xs[k]));
+    cross.setAttribute('x2', X(xs[k]));
+    cross.setAttribute('visibility', 'visible');
+    const rows = spec.series.map((x) => `<div><span style="color:${x.colour}">●</span> ${esc(x.label)} <b>${fmt(x.values[k], 2)} ${esc(spec.unit)}</b></div>`).join('');
+    const d = spec.series[0].values[k] - spec.series[1].values[k];
+    return `<div>${fmt(xs[k], 0)} ${esc(spec.xUnit)} driven</div>${rows}<div class="note">read − T2015_449: ${d >= 0 ? '+' : ''}${fmt(d, 2)} ${esc(spec.unit)}</div>`;
+  });
+  hit.addEventListener('pointerleave', () => cross.setAttribute('visibility', 'hidden'));
+}
+
 // A profile: a quantity (x) against height (y, up). spec: { title, x: [], y: [], unit, yUnit, log,
 // colour, marks: [{ y, label }], bands: [{ from, to, label }], format(x) }.
 export function profile(el, spec) {

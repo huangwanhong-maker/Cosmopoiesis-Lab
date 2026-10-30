@@ -21,6 +21,9 @@ export function fmt(x, digits = 3) {
 const SUP = { '-': '⁻', 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹' };
 export const superscript = (s) => String(s).split('').map((c) => SUP[c] ?? c).join('');
 
+// x shown to `digits` decimals: a value that rounds to zero there is zero, not rounding's residue in powers of ten.
+export const shown = (x, digits) => (Number.isFinite(x) && Math.abs(x) < 0.5 * 10 ** -digits ? 0 : x);
+
 // A length in a unit fitting its size.
 export function length(m, digits = 3) {
   if (m === null || m === undefined || !Number.isFinite(m)) return '—';

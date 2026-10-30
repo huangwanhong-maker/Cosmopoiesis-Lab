@@ -5,7 +5,7 @@
 //
 // Each family names its main quantity; a family not named here shows its first numeric quantities.
 
-import { esc, fmt, latText, lonText, length, duration } from './format.js';
+import { esc, fmt, latText, lonText, length, duration, shown } from './format.js';
 
 const nT = (t) => t * 1e9;
 
@@ -23,7 +23,7 @@ const FAMILIES = {
   'radiosonde.ussa1976': (v) => ({ value: fmt((v.levels?.height_m || []).length, 0), unit: 'levels', label: 'column',
     parts: [['from', `${fmt(v.ground_msl_m, 0)} m`], ['to', '86 km']] }),
   'gravimeter.body': (v) => ({ value: fmt(v.gravity_m_s2, 5), unit: 'm/s²', label: 'g',
-    parts: [['deflection', `${fmt(v.deflection_deg * 3600, 2)}″`], ['model', v.model]] }),
+    parts: [['deflection', `${fmt(shown(v.deflection_deg * 3600, 2), 2)}″`], ['model', v.model]] }),
   'sun.sensor': (v) => ({ value: v.elevation_deg !== undefined ? fmt(v.elevation_deg, 2) : fmt(v.disc_visible * 100, 1), unit: v.elevation_deg !== undefined ? '° elevation' : '% of the disc',
     label: 'Sun', parts: [['irradiance', `${fmt(v.irradiance_w_m2, 1)} W/m²`], ...(v.azimuth_deg !== undefined ? [['az', `${fmt(v.azimuth_deg, 1)}°`]] : []),
       ...(v.disc_visible < 0.999 ? [['seen', `${fmt(v.disc_visible * 100, 1)}%`]] : [])] }),
@@ -49,6 +49,9 @@ const FAMILIES = {
   'feed.goes.protons': (v) => ({ value: fmt(v.flux_pfu, 2), unit: 'pfu', label: 'protons > 10 MeV', parts: [['storm', v.radiation_storm === 'none' ? 'none' : v.radiation_storm]] }),
   'feed.usgs.earthquakes': (v) => ({ value: fmt(v.count_24h, 0), unit: 'in 24 h', label: 'earthquakes', parts: v.largest_magnitude ? [['largest', `M ${fmt(v.largest_magnitude, 1)}`], ['', String(v.largest_place || '')]] : [] }),
   'terrain.dem': (v) => ({ value: fmt(v.height_m, 1), unit: 'm', label: 'ground', parts: [['datum', v.datum], ['resolution', `${fmt(v.resolution_m, 0)} m`]] }),
+  'seismic_column.crust1': (v) => ({ value: fmt(v.crust_m / 1e3, 1), unit: 'km of crust', label: 'crust',
+    parts: [['kind', v.oceanic ? 'oceanic' : 'continental'], ['Moho', `${fmt(v.moho_depth_m / 1e3, 1)} km down`], ...(v.water_m > 0 ? [['water', `${fmt(v.water_m / 1e3, 2)} km`]] : []),
+      ['Pn', `${fmt(v.mantle.vp_m_s / 1e3, 2)} km/s`]] }),
 };
 
 // A reading's first numeric quantities, for a family not named above.

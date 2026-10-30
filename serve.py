@@ -26,6 +26,14 @@ README, §5:
                                              acquisition session's world was last told (the satellites' element sets,
                                              the solar wind, the present, the seed), so that the cube reads the world the
                                              session's sensors read, in the page's engine, without pausing the session's
+    POST /api/engine {"op": "beneath.section", "at"?: "observer" | {"latitude_deg", "longitude_deg", "body"}, "azimuth_deg",
+                      "half_m", "step_m"?, "swath_m"?}
+                                             the Earth (or the Moon) cut along a geodesic through the observer or a place:
+                                             the engine's samples, CRUST1.0's columns and PREM's shells (beneath.hpp), with
+                                             the server's terrain along it (the data library's tiles: ETOPO 2022 or
+                                             Terrarium on the Earth, its sea floor and its sea apart; LOLA on the Moon) and
+                                             Global CMT's earthquakes within the swath (the product events-gcmt); the last
+                                             few kept
     GET  /api/clock                          the mission clock: TT at a wall instant, its rate, running or not
     POST /api/clock                          {"action": "set" | "rate" | "play" | "pause" | "present", "time"?: text, "tt_s"?, "rate"?}
     GET  /api/bus?since=n&wait=s             the readings delivered since sequence n (waiting up to s seconds for one)
@@ -59,6 +67,7 @@ from __future__ import annotations
 import argparse
 import http.server
 import json
+import math
 import os
 import re
 import sys
@@ -105,7 +114,7 @@ WRITES = {"allowed": True, "token": None}
 LIMITS = {"bytes": 256 * 1024, "samples": 4000, "positions": 10000, "seconds": 60.0, "max_level": {"earth": 18, "moon": 14},
           "probe": {"n": [2, 24], "edge_m": [1.0, 2e7], "threads": min(8, os.cpu_count() or 4)}}
 OPS = {"status", "time", "frames", "ephemeris", "bodies", "transform", "holonomy", "convert", "address", "geodesic", "satellites", "instruments",
-       "fields", "field.sample", "field.curves", "field_lines", "field_map", "probe_volume",
+       "fields", "field.sample", "field.curves", "field_lines", "field_map", "probe_volume", "beneath.section",
        "mission.start", "mission.step", "mission.state", "mission.map", "mission.stop", "mission.calibrate"}
 # The missions' requests that change what every viewer sees: allowed as the clock's and the acquisition's are.
 MISSION_WRITES = {"mission.start", "mission.step", "mission.stop"}
@@ -184,6 +193,158 @@ def probe_refusal(body: dict) -> str | None:
     return None
 
 
+# ---- the world beneath: a section through the Earth or the Moon (decision 0010) ---------------------
+
+SECTIONS: dict[str, dict] = {}
+GCMT: dict = {}
+SECTION_LIMITS = {"half_m": [1e3, 5000e3], "samples": 2001, "swath_m": 500e3}
+
+
+def section_refusal(body: dict) -> str | None:
+    at = body.get("at", "observer")
+    if at != "observer" and not (isinstance(at, dict) and all(isinstance(at.get(k), (int, float)) for k in ("latitude_deg", "longitude_deg"))
+                                 and at.get("body", "earth") in ("earth", "moon")):
+        return 'beneath.section: "at" is "observer" or {"latitude_deg", "longitude_deg", "body": "earth" | "moon"}'
+    try:
+        az, half = float(body["azimuth_deg"]), float(body["half_m"])
+        step = float(body.get("step_m", half / 200))
+        swath = float(body.get("swath_m", 100e3))
+    except (KeyError, TypeError, ValueError):
+        return "beneath.section: azimuth_deg and half_m are numbers (step_m and swath_m too, if given)"
+    lo, hi = SECTION_LIMITS["half_m"]
+    if (not (lo <= half <= hi) or not step > 0 or 2 * half / step + 1 > SECTION_LIMITS["samples"]
+            or not 0 <= swath <= SECTION_LIMITS["swath_m"] or not math.isfinite(az)):
+        return (f"beneath.section: a half-length from {lo / 1e3:.0f} to {hi / 1e3:.0f} km, at most {SECTION_LIMITS['samples']} samples, "
+                f"a swath of at most {SECTION_LIMITS['swath_m'] / 1e3:.0f} km")
+    return None
+
+
+def gcmt_events() -> dict:
+    """Global CMT's centroids, from the data library's product events-gcmt, read once: arrays of latitude,
+    longitude, depth, magnitude and time, with their names; a reason when the product is not in the cache."""
+    if not GCMT:
+        import numpy as np
+        try:
+            data = json.loads((CACHE / "products" / "events-gcmt.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            GCMT["missing"] = "Global CMT is not in the cache (python data/acquisition/fetch.py gcmt; python data/products/mechanism_catalog.py)"
+            return GCMT
+        f = {k: i for i, k in enumerate(data["fields"])}
+        ev = data["events"]
+
+        def col(k):
+            return np.array([e[f[k]] for e in ev], dtype=float)
+
+        GCMT.update(lat=col("lat"), lon=col("lon"), depth_km=col("depth_km"), mw=col("mw"), time_ms=col("time_ms"),
+                    name=[e[f["name"]] for e in ev], region=[e[f["region"]] for e in ev], window=data.get("window", {}),
+                    title=data.get("title", "Global CMT"), count=len(ev))
+    return GCMT
+
+
+def terrain_along(body: str, lons, lats, step_m: float) -> dict:
+    """The heights of the ground or the sea floor at points (orthometric on the Earth, above the Moon's
+    sphere), whether each is under the sea, and what they come from: ETOPO 2022 at 5' for steps of 4 km
+    and more, else Terrarium at the zoom of half the step (ETOPO beyond Mercator's latitudes); LOLA on the
+    Moon at the grid nearest half the step."""
+    import numpy as np
+    out: dict = {}
+    if body == "earth":
+        heights = np.full(lons.shape, np.nan)
+        sources: list[str] = []
+        resolution = TERRAIN.etopo().resolution_m
+        polar = np.abs(lats) > 85.05
+        if step_m < 4000 and not polar.all():
+            mid = float(np.cos(np.radians(np.median(lats))))
+            zoom = int(min(12, max(5, math.ceil(math.log2(40075016.686 * max(mid, 0.05) / (256 * step_m / 2))))))
+            try:
+                values, (res_land, _res_sea), src = TERRAIN.terrarium().sample(lons[~polar], lats[~polar], zoom)
+                heights[~polar] = values
+                resolution = float(np.median(res_land))
+                # The tiles name their files; the datasets are what a reader needs (SRTM, GMTED, ETOPO1, ...).
+                datasets = sorted({x.split("/")[0].upper() for x in src})
+                sources.append(f"Terrarium z{zoom}" + (f" ({', '.join(datasets)})" if datasets else ""))
+            except Exception as error:  # the network: fall back to the grid in the cache, and say so
+                sources.append(f"Terrarium unreachable ({type(error).__name__}); ETOPO 2022 instead")
+        inland = TERRAIN.land().inland(lons, lats)
+        # SRTM writes water as 0 m: where Terrarium has 0 at sea, the sea floor is ETOPO's.
+        rest = ~np.isfinite(heights) | ((heights == 0) & ~inland)
+        if rest.any():
+            heights[rest] = TERRAIN.etopo().sample(lons[rest], lats[rest])
+            sources.append("ETOPO 2022, 5′ (NOAA NCEI)" + (", where Terrarium has 0 m at sea" if step_m < 4000 else ""))
+        sea = (heights < 0) & ~inland
+        out.update(height_m=heights, sea=sea, sources=sources, resolution_m=resolution,
+                   datum="orthometric: above mean sea level (the sources' geoids); the sea's surface at 0")
+    else:
+        ppd = 4 if step_m >= 7000 else 16 if step_m >= 1800 else 64 if step_m >= 470 else 128
+        h, measured = TERRAIN.lola().sample(lons, lats, ppd)
+        out.update(height_m=np.asarray(h, dtype=float), sea=np.zeros(lons.shape, dtype=bool), sources=[f"LOLA LDEM_{ppd} (NASA GSFC)"],
+                   resolution_m=1737.4e3 * math.radians(1 / ppd), measured=np.asarray(measured, dtype=bool),
+                   datum="above the Moon's sphere of 1737.4 km")
+    out["height_m"] = [None if not math.isfinite(float(x)) else round(float(x), 2) for x in out["height_m"]]
+    out["sea"] = [bool(x) for x in out["sea"]]
+    if "measured" in out:
+        out["measured"] = [bool(x) for x in out["measured"]]
+    return out
+
+
+def beneath_section(body: dict) -> tuple[dict, int]:
+    """A section through the observer or a place: the engine's, with the terrain along it and the
+    earthquakes near it."""
+    import numpy as np
+    at = body.get("at", "observer")
+    place = ACQUISITION.observer_place if at == "observer" else at
+    if not place:
+        return {"error": "beneath.section: there is no observer yet"}, 422
+    which = place.get("body", "earth")
+    if which not in ("earth", "moon"):
+        return {"error": f"beneath.section: the Earth or the Moon, not {which}"}, 422
+    lat, lon = float(place["latitude_deg"]), float(place["longitude_deg"])
+    half, az = float(body["half_m"]), float(body["azimuth_deg"]) % 360
+    step = float(body.get("step_m", half / 200))
+    swath = float(body.get("swath_m", 100e3))
+    key = json.dumps([which, round(lat, 5), round(lon, 5), round(az, 3), half, step, swath])
+    if key in SECTIONS:
+        return SECTIONS[key], 200
+    request = {"op": "beneath.section", "body": which, "latitude_deg": lat, "longitude_deg": lon, "azimuth_deg": az,
+               "half_m": half, "step_m": step, "swath_m": swath, "events": []}
+    chosen = np.zeros(0, dtype=int)
+    catalogue: dict = {}
+    if which == "earth":
+        g = gcmt_events()
+        if "missing" in g:
+            catalogue = {"missing": g["missing"]}
+        else:
+            # Those within reach of the section by the haversine on the mean sphere, for the engine to place exactly.
+            p1, p2 = math.radians(lat), np.radians(g["lat"])
+            h = np.sin((p2 - p1) / 2) ** 2 + math.cos(p1) * np.cos(p2) * np.sin(np.radians(g["lon"] - lon) / 2) ** 2
+            reach = 2 * np.arcsin(np.minimum(1, np.sqrt(h))) * 6371.0088e3
+            chosen = np.nonzero(reach <= 1.02 * (half + swath) + 20e3)[0]
+            request["events"] = [[float(g["lat"][i]), float(g["lon"][i]), float(g["depth_km"][i]) * 1e3, float(g["mw"][i])] for i in chosen]
+            catalogue = {"title": g["title"], "window": g["window"], "count": g["count"],
+                         "about": "centroids of earthquakes since 1976, mostly of magnitude 5 and more; depth below the surface, as the catalogue gives it"}
+    answer = ENGINE.ask(request, timeout=LIMITS["seconds"])
+    if "error" in answer:
+        return answer, 422
+    events = []
+    if which == "earth" and "missing" not in catalogue:
+        for i, along, across in answer.get("events", []):
+            k = int(chosen[int(i)])
+            events.append({"along_m": along, "across_m": across, "depth_m": float(GCMT["depth_km"][k]) * 1e3, "magnitude": float(GCMT["mw"][k]),
+                           "time_utc": time.strftime("%Y-%m-%d", time.gmtime(GCMT["time_ms"][k] / 1000)), "name": GCMT["name"][k],
+                           "region": GCMT["region"][k]})
+    answer["events"] = events
+    answer["catalogue"] = catalogue
+    points = answer["points"]
+    try:
+        answer["terrain"] = terrain_along(which, np.array(points["longitude_deg"]), np.array(points["latitude_deg"]), step)
+    except (OSError, ValueError, KeyError) as error:
+        answer["terrain"] = {"missing": f"the terrain's sources are not in the cache ({error})"}
+    while len(SECTIONS) >= 8:
+        SECTIONS.pop(next(iter(SECTIONS)))
+    SECTIONS[key] = answer
+    return answer, 200
+
+
 def mission_refusal(op: str, body: dict) -> str | None:
     """Why a mission's request is refused, or None."""
     session = body.get("session", "default")
@@ -213,6 +374,8 @@ def engine_refusal(body: dict) -> str | None:
         return f"unknown op {op!r}: one of {', '.join(sorted(OPS))}"
     if op == "probe_volume":
         return probe_refusal(body)
+    if op == "beneath.section":
+        return section_refusal(body)
     if op.startswith("mission."):
         return mission_refusal(op, body)
     if op == "address" and (not isinstance(body.get("text"), str) or len(body["text"]) > 2000):
@@ -351,6 +514,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 refusal = write_refusal(self)
                 if refusal:
                     return self.reply_json({"error": refusal}, 403)
+            if body["op"] == "beneath.section":
+                return self.reply_json(*beneath_section(body))
             body.pop("sources", None)  # the world's sources are the server's to name
             body.pop("files", None)    # and so are the files it reads
             if body["op"] == "satellites":

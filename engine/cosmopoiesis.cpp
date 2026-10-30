@@ -53,6 +53,11 @@
 //                                                     n³ cells of a cube about an event, in the body's east, north
 //                                                     and up (neighbourhood.hpp): a session's world, or one told
 //                                                     the session's inputs
+//   {"op": "beneath.section", "body": "earth" | "moon", "latitude_deg", "longitude_deg", "azimuth_deg", "half_m", "step_m"?,
+//    "swath_m"?, "events"?: [[lat_deg, lon_deg, depth_m, magnitude], ...]}
+//                                                     the Earth cut along a geodesic through a place (beneath.hpp):
+//                                                     its samples, CRUST1.0's columns, PREM's shells, and the
+//                                                     events within the swath, along and across
 //   {"op": "acquire.configure" | "acquire.step" | "acquire.analyse" | "acquire.describe", "session": id, ...}
 //                                                     the acquisition runtime (acquisition.hpp): sensors, servers and
 //                                                     policy; one step of releases, scheduling and dispatch; a
@@ -88,6 +93,7 @@
 #include <navigation/orbits/tle.hpp>
 
 #include "acquisition.hpp"
+#include "beneath.hpp"
 #include "coordinates.hpp"
 #include "declared.hpp"
 #include "environment.hpp"
@@ -189,6 +195,7 @@ const Registry& registry() {
     x.add(std::make_unique<GnssReceiver>());
     add_environment_instruments(x);
     add_lunar_instruments(x);
+    add_structure_instruments(x);
     return x;
   }();
   return r;
@@ -210,12 +217,14 @@ World& field_world(Spacetime& s, const Json& r) {
   static std::string key;
   static std::uint64_t seed0 = 0;
   const Json& sources = r["sources"];
-  const std::string k = s.sources().ephemeris + "|" + sources["wmm"].text() + "|" + sources["moon_magnetic"].text() + "|" + sources["geoid"].text();
+  const std::string k = s.sources().ephemeris + "|" + sources["wmm"].text() + "|" + sources["moon_magnetic"].text() + "|" + sources["geoid"].text() + "|" +
+                        sources["crust1"].text();
   if (!w || k != key || &w->spacetime() != &s) {
     w = std::make_unique<World>(s);
     w->geoid = geoid_grid(sources["geoid"].text());
     attach_environment_models(*w, sources);
     attach_lunar_model(*w, sources);
+    attach_structure_model(*w, sources);
     key = k;
     seed0 = w->seed;
   }
@@ -319,6 +328,7 @@ std::unique_ptr<World> session_world(Spacetime& s, const Json& sources) {
   w->geoid = geoid_grid(sources["geoid"].text());
   attach_environment_models(*w, sources);
   attach_lunar_model(*w, sources);
+  attach_structure_model(*w, sources);
   return w;
 }
 
@@ -658,6 +668,7 @@ Json answer(const Json& r) {
     return field_map(w, r);
   }
   if (op == "probe_volume") return probe_volume_answer(s, r);
+  if (op == "beneath.section") return beneath_section(r);
   if (op == "acquire.configure") return session_of(s, r).session->configure(r);
   if (op == "acquire.describe") return session_of(s, r).session->describe();
   if (op == "acquire.step") return session_of(s, r).session->step(r);

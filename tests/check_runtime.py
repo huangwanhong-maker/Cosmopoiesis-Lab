@@ -119,6 +119,8 @@ sensors = [
     {"id": "mag", "family": "magnetometer.wmm2025", "mount": "observer", "period_s": 1},
     {"id": "moon.grav", "family": "gravimeter.body", "mount": "moon(0.674 N, 23.473 E)", "period_s": 5},
     {"id": "moon.mag", "family": "magnetometer.wmm2025", "mount": "moon(0.674 N, 23.473 E)", "period_s": 5},
+    {"id": "column", "family": "seismic_column.crust1", "mount": "observer", "period_s": 5},
+    {"id": "moon.column", "family": "seismic_column.crust1", "mount": "moon(0.674 N, 23.473 E)", "period_s": 5},
 ] + ([{"id": "gnss", "family": "gnss.receiver", "mount": "observer", "period_s": 1}] if gnss else [])
 
 eng = E.Engine()
@@ -174,6 +176,31 @@ try:
     gm_moon, r_moon = 4.9028001218467e12, 1737400.0  # DE440's GM of the Moon; the IAU's mean radius
     check("gravimeter: on the Moon, GM/R² less the centrifugal term of its turning",
           abs(v.get("attraction_m_s2", 0) - gm_moon / r_moon ** 2) < 1e-4 and 0 < v.get("centrifugal_m_s2", -1) < 2e-5, v.get("attraction_m_s2"))
+
+    # The seismic column beneath Greenwich (decision 0010): CRUST1.0's cell to its Moho, PREM to the centre.
+    col = readings.get("column", {})
+    v = col.get("values", {})
+    if (ROOT / "data" / "cache" / "products" / "crust-crust1.bin").exists():
+        layers = v.get("layers", [])
+        joined = all(abs(layers[i]["bottom_m"] - layers[i + 1]["top_m"]) < 1e-6 for i in range(len(layers) - 1))
+        check("seismic column: CRUST1.0's cell holding Greenwich, its layers joined from the top to the Moho",
+              col.get("available") and v.get("cell", {}).get("latitude_deg") == 51.5 and v.get("cell", {}).get("longitude_deg") == -0.5 and joined
+              and layers and abs(layers[-1]["bottom_m"] + v.get("moho_depth_m", 0)) < 1e-6, v.get("cell"))
+        p = v.get("profile", {})
+        depth = p.get("depth_m", [])
+        check("seismic column: its profile from the top to the centre, PREM's density there (13.0885 g/cm³) and S waves stopped by the outer core",
+              bool(depth) and depth[-1] == 6371e3 and abs(p.get("density_kg_m3", [0])[-1] - 13088.5) < 1e-6
+              and any(d == 2891e3 and vs == 0 for d, vs in zip(depth, p.get("vs_m_s", []))), f"{len(depth)} samples")
+        g = p.get("gravity_m_s2", [])
+        check("seismic column: PREM's gravity greatest at the core–mantle boundary", bool(g) and depth[g.index(max(g))] == 2891e3, max(g) if g else None)
+        check("seismic column: the time of a P wave through the crust is its layers' thicknesses over their speeds",
+              abs(v.get("crust_p_time_s", 0) - sum((l["top_m"] - l["bottom_m"]) / l["vp_m_s"] for l in layers if l["name"] not in ("water", "ice"))) < 1e-9,
+              v.get("crust_p_time_s"))
+    else:
+        out(skip="seismic column: CRUST1.0 is not in the cache (python data/acquisition/fetch.py crust1; python data/products/crust_model.py)")
+    m = readings.get("moon.column", {})
+    check("seismic column: refused on the Moon, outside its coverage, with the reason", m.get("available") is False and "earth" in (m.get("reason") or ""),
+          m.get("reason"))
 
     v = readings.get("air", {}).get("values", {})
     h = v.get("height_msl_m", 0)

@@ -1,6 +1,6 @@
 # 0006. The World First: the Context, Two Decks, Readings Before Machinery, and the Field About a Point
 
-- **Status:** Accepted, provisionally (the arrangement of the displays awaits the usability task of §4). Amends [0003](0003-one-world-its-addresses-and-a-console.md) §2.3 (its type) and the displays' pages of [0004](0004-instruments-and-their-acquisition.md) and [0005](0005-fields-known-in-part-and-declared-instruments.md).
+- **Status:** Accepted, provisionally (the arrangement of the displays awaits the usability task of §4). Amends [0003](0003-one-world-its-addresses-and-a-console.md) §2.3 (its type) and the displays' pages of [0004](0004-instruments-and-their-acquisition.md) and [0005](0005-fields-known-in-part-and-declared-instruments.md). Its field about a point is amended by [0007](0007-the-worlds-fields-and-their-drawing.md), its type (§2.4) by [0009](0009-a-precision-console-and-figures-that-separate.md).
 - **Date:** 2026-10-29
 - **Decided by:** the user, in two requests.
   - **The field about a point.** "Whether we can utilizing 3D cube to visualize a spacetime point nearby's magnet field … just fill different color inside this. And for other available sensor also the same."

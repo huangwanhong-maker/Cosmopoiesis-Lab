@@ -67,8 +67,7 @@ export function fieldPage(app) {
           <span>Edge</span><div class="row" style="margin:0">${seg('edge', EDGES, state.edge)}</div>
           <span>Cells</span><div class="row" style="margin:0">${seg('n', SIZES.map((s) => [s, `${s}³`]), state.n)}${seg('placement', [['auto', 'Auto'], ['centred', 'Centred'], ['above', 'On the ground']], state.placement)}</div>
         </div>
-        <div class="cube-view" id="fd-cube"></div>
-        <div class="cube-legend" id="fd-legend"></div>
+        <div id="fd-figure"><div class="cube-view" id="fd-cube"></div><div class="cube-legend" id="fd-legend"></div></div>
         <div class="controls-grid">
           <span>Show</span>${seg('mode', MODES, state.mode)}
           <span>Colour</span>${seg('scale', SCALES, state.scale || 'linear')}
@@ -83,7 +82,8 @@ export function fieldPage(app) {
         <div id="fd-stats"><p class="note">Choose a point (a click on a body), or centre the cube on the observer.</p></div>
         <div id="fd-reasons"></div>
         <p class="note" id="fd-about"></p>`;
-      view = new CubeView(el.querySelector('#fd-cube'), { onHover: (cell) => { hoverCell = cell; readout(); } });
+      view = new CubeView(document.getElementById('fd-cube'), { onHover: (cell) => { hoverCell = cell; readout(); } });
+      app.separator.attach(document.getElementById('fd-figure'), { id: 'field-cube', title: 'The field about a point', page: 'FIELD', onChange: () => view.resize() });
       el.addEventListener('click', (e) => {
         const b = e.target.closest('[data-seg] [data-v]');
         if (b) {
@@ -147,12 +147,12 @@ export function fieldPage(app) {
     async sample() {
       const at = centreText();
       fillWhere();
-      if (!at) { answer = null; view.show({ n: state.n, edgeText: '' }); el.querySelector('#fd-legend').innerHTML = ''; return; }
+      if (!at) { answer = null; view.show({ n: state.n, edgeText: '' }); document.getElementById('fd-legend').innerHTML = ''; return; }
       const family = familyFor();
       if (!family) return;
       fillFamilies();
       asking = true;
-      el.querySelector('#fd-cube').insertAdjacentHTML('beforeend', '<div class="busy"></div>');
+      document.getElementById('fd-cube').insertAdjacentHTML('beforeend', '<div class="busy"></div>');
       const request = { op: 'probe_volume', at, time: ttText(app.clock.now()), edge_m: state.edge, n: state.n, encoding: 'f32',
         ...(family.startsWith('field:') ? { field: family.slice(6) } : { family }) };
       try {
@@ -169,7 +169,7 @@ export function fieldPage(app) {
         el.querySelector('#fd-stats').innerHTML = `<p class="error">The cube was not read: ${esc(error.message)}</p>`;
       } finally {
         asking = false;
-        el.querySelector('#fd-cube .busy')?.remove();
+        document.querySelector('#fd-cube .busy')?.remove();
       }
     },
 
@@ -179,7 +179,7 @@ export function fieldPage(app) {
       if (!q) {
         // Nothing read: say why, and draw the empty cube.
         view.show({ n: answer.n, cells: [], edgeText: `edge ${length(answer.edge_m)} · no cell read` });
-        el.querySelector('#fd-legend').innerHTML = '';
+        document.getElementById('fd-legend').innerHTML = '';
         el.querySelector('#fd-stats').innerHTML = `<div class="readings"><div class="reading off wide"><div class="what">${esc(answer.title)} reads nothing in this cube</div><div class="v">${esc(answer.reasons?.[0]?.reason || 'no reason given')}</div></div></div>`;
         el.querySelector('#fd-reasons').innerHTML = '';
         app.scene.setObject('field-cube', null, null, null);
@@ -219,7 +219,7 @@ export function fieldPage(app) {
       // The legend.
       const lo = scale ? scale.lo * k : NaN, hi = scale ? scale.hi * k : NaN;
       const digits = digitsFor(Math.abs(hi - lo));
-      el.querySelector('#fd-legend').innerHTML = scale ? `<span class="lo">${fmt(lo, digits)}</span><span class="ramp" style="background:${rampCss(scale, night)}"></span><span class="hi">${fmt(hi, digits)} ${esc(unit)}</span>
+      document.getElementById('fd-legend').innerHTML = scale ? `<span class="lo">${fmt(lo, digits)}</span><span class="ramp" style="background:${rampCss(scale, night)}"></span><span class="hi">${fmt(hi, digits)} ${esc(unit)}</span>
         <span class="label">${esc(labelOf(q))}${scale.kind === 'log' ? ', logarithmic' : scale.kind === 'diverging' ? `, about the centre's ${fmt(centre * k, digits)} ${esc(unit)}` : ''}${level ? ` · the level surface at ${fmt(level.value * k, digits)} ${esc(unit)}` : ''}${state.arrows !== 'off' && answer.vector ? ` · arrows: ${state.arrows === 'departure' ? 'the departure of' : ''} ${esc(answer.vector.name)} (${esc(answer.vector.frame || 'the cube\'s axes')})` : ''}</span>` : '<span class="label">no cell has a reading</span>';
       el.querySelector('#fd-fill').disabled = slicesOn || state.mode === 'shell' || levelOn;
       // Across the cube: the centre, the range, the gradient, the cells read.
@@ -319,7 +319,7 @@ export function fieldPage(app) {
   }
   // The hovered cell, or the cube's summary.
   function readout() {
-    const box = el.querySelector('#fd-cube .readout');
+    const box = document.querySelector('#fd-cube .readout');
     if (!box) return;
     if (!answer || !el) { box.innerHTML = ''; return; }
     const q = quantity();

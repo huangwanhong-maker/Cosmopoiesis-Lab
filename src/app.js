@@ -42,6 +42,7 @@ import { busPage } from './pages/bus.js';
 import { instrPage } from './pages/instr.js';
 import { schedPage } from './pages/sched.js';
 import { roverPage } from './pages/rover.js';
+import { Separator } from './separate.js';
 
 const { cartesian, geodetic, IMAGERY, loadStarProduct, apply, applyTransposed, localFrame } = globe;
 const $ = (s) => document.querySelector(s);
@@ -470,7 +471,7 @@ function drawLabels(bodies, P, sats) {
   if (op && !same) { const sc = at(op.body, op.longitude_deg * DEG, op.latitude_deg * DEG, op.height_m || 0); if (sc) marks.push({ name: 'Observer', screen: sc, chosen: true, colour: '#CDB0EE' }); }
   const night = document.documentElement.dataset.theme !== 'day';
   app.labels.draw(['earth', 'moon'].includes(key) ? { body: key, fig: b.fig, rotation: B.rotation, rel, camBody, range: app.nav.controls.view.range, project } : null,
-    { size: 13, font: "'Source Sans 3', 'Segoe UI', system-ui, sans-serif", ink: night ? '#F7ECF6' : '#FFF8FD', halo: 'rgba(18, 8, 24, 0.8)', dot: '#EE8FBD',
+    { size: 13, font: "'IBM Plex Sans Condensed', 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif", ink: night ? '#F7ECF6' : '#FFF8FD', halo: 'rgba(18, 8, 24, 0.8)', dot: '#EE8FBD',
       satellite: '#F2D8EC', chosen: '#FF9FCE', body: '#E9D2F2' }, [...marks, ...extra]);
 }
 
@@ -702,6 +703,12 @@ async function main() {
   if (saved?.options) { const o = app.scene.options; Object.assign(o, { ...saved.options, base: { ...o.base, ...(saved.options.base || {}) } }); app.scene.setLayers(); }
   app.scene.onChange = app.touch;
   app.labels = new Labels($('#labels'));
+  app.labels.cover = () => {
+    const rect = (s) => document.querySelector(s)?.getBoundingClientRect();
+    const W = window.innerWidth, H = window.innerHeight, top = rect('#context') || rect('.glare'), foot = rect('#cdu');
+    return [top && [0, 0, W, top.bottom], foot && [0, foot.top, W, H],   // the bars, from the window's edges
+      ...['#mfd-left', '#mfd-right'].map(rect).filter((r) => r?.width).map((r) => [r.left, r.top, r.right, r.bottom])].filter(Boolean);
+  };
   if (saved?.labels) Object.assign(app.labels.enabled, saved.labels);
   app.gazetteer = new Gazetteer();
   app.nav = new Navigator($('#globe'), app.scene, { onChange: app.touch });
@@ -725,13 +732,14 @@ async function main() {
   const RIGHT = [['ENV', 'The environment the observer\'s instruments read', 'science'], ['FIELD', 'The field about a point, as a cube filled with colour', 'science'], ['INSTR', 'The instruments, their readings first', 'both'],
     ['ROVER', 'A rover surveying the Moon\'s field, and what its mission knows', 'science'],
     ['BUS', 'Every stream of readings, with its envelope', 'engineering'], ['SCHED', 'The acquisition\'s scheduling', 'engineering']];
+  app.separator = new Separator();
   app.console.display('left', LEFT);
   app.console.display('right', RIGHT);
   app.pages = { POINT: pointPage(app), TIME: timePage(app), FRAMES: framesPage(app), LAYERS: layersPage(app), SYS: sysPage(app),
     ENV: envPage(app), FIELD: fieldPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app), ROVER: roverPage(app) };
   for (const [k] of LEFT) app.console.register('left', k, app.pages[k]);
   for (const [k] of RIGHT) app.console.register('right', k, app.pages[k]);
-  app.isShown = (k) => app.console.isShown(k);
+  app.isShown = (k) => app.console.isShown(k) || app.separator.pageHasOut(k);  // a page whose figure is out is kept current
   const shown = app.console.restore();
   app.console.deck = shown?.deck === 'engineering' ? 'engineering' : 'science';
   app.console.show('left', shown?.left && app.pages[shown.left] && LEFT.some(([k]) => k === shown.left) ? shown.left : 'POINT');

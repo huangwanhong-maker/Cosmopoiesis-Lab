@@ -5,7 +5,8 @@
 // sizeable fraction of the camera's range; on the Earth, countries from afar and towns near),
 // faces the camera (not hidden by the body's figure, globe.occluded) and falls inside the view.
 // Candidates are taken in the gazetteer's order of importance, and each is kept unless its box
-// meets one already kept.
+// meets one already kept, or one of the console's panels (cover): the bars are glass, and a name
+// beneath one would show through it.
 
 import { globe } from '../../../visualization/js/index.js';
 
@@ -19,6 +20,7 @@ export class Labels {
     this.places = { earth: [], moon: [] };
     this.enabled = { earth: false, moon: true, bodies: true };
     this.hits = [];
+    this.cover = () => [];   // the console's panels, [[left, top, right, bottom]] in CSS pixels
   }
 
   setPlaces(body, product) {
@@ -46,7 +48,7 @@ export class Labels {
     this.hits = [];
     ctx.setTransform(r, 0, 0, r, 0, 0);
     ctx.textBaseline = 'middle';
-    const taken = [];
+    const taken = this.cover();
     // The bodies' names, upright, and the satellites', italic, beside their points (which the scene
     // draws), the chosen one first.
     for (const e of extra) {

@@ -13,6 +13,7 @@
 // when new readings have come. The map is the engine's grid read bilinearly (mission.js).
 
 import { engine } from '../api.js';
+import { alongTrack } from '../charts.js';
 import { esc, fmt } from '../format.js';
 import { styles } from '../../../../visualization/js/index.js';
 import { QUANTITIES, emptyMission, groupRange, merge, offsetMetres, project, quantityOf, rasterise, unproject, valueAt, whitenedBand } from '../mission.js';
@@ -25,11 +26,13 @@ const PLANS = [['lawnmower', 'Lines'], ['adaptive', 'Where least known']];
 const FIDELITIES = [['kinematic', 'Kinematic'], ['dynamic', 'Dynamic']];
 const RATES = [[60, '×60'], [600, '×600'], [3600, '×3600']];
 const TICK_MS = 400, MAP_EVERY_MS = 2500, PICTURE = 240, MAP_MAX_PX = 420, STEP_MAX_S = 3600;
+// A magnitude's map by the ground it is drawn on: plum on the night's dark glass, orchid on the day's.
+const mapName = (q) => (q.map === 'orchid' && document.documentElement.dataset.theme !== 'day' ? 'plum' : q.map);
 
 export function roverPage(app) {
   let el, canvas, mission = emptyMission(), map = null, running = false, timer = null, busy = false, mapping = false, mapAgain = false, lastMap = 0, lastTick = 0, mappedReadings = -1, hover = null;
   // The rate achieved, mission seconds over wall seconds, smoothed: the engine serves the acquisition too.
-  let achieved = null, measuredAt = null;
+  let achieved = null, measuredAt = null, drawnTrack = '';
   const state = Object.assign({ site: 'reiner', plan: 'lawnmower', fidelity: 'kinematic', seed: 1, rate: 600, quantity: 'mean', reveal: false },
     (() => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { return {}; } })());
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(state)); } catch { /* no storage */ } };
@@ -125,20 +128,25 @@ export function roverPage(app) {
         </div>
         <div class="keyrow"><button type="button" class="key small" id="rv-start">Start a new mission</button><button type="button" class="key small" id="rv-run">Run</button>${seg('rate', RATES, state.rate)}</div>
         <p class="error" id="rv-error" hidden></p>
-        <div class="controls-grid"><span>Show</span>${seg('quantity', QUANTITIES.map((q) => [q.key, q.label]), state.quantity)}</div>
-        <div class="num" id="rv-line">&nbsp;</div>
-        <div class="rover-map"><canvas id="rv-map" aria-label="The mission's map: the posterior of the crust's field about the site, the rover's track and readings"></canvas></div>
-        <div class="cube-legend" id="rv-legend"></div>
-        <div class="note num" id="rv-readout">&nbsp;</div>
+        <div id="rv-figure">
+          <div class="controls-grid"><span>Show</span>${seg('quantity', QUANTITIES.map((q) => [q.key, q.label]), state.quantity)}</div>
+          <div class="figure-line" id="rv-line">&nbsp;</div>
+          <div class="rover-map"><canvas id="rv-map" aria-label="The mission's map: the posterior of the crust's field about the site, the rover's track and readings"></canvas></div>
+          <div class="cube-legend" id="rv-legend"></div>
+          <div class="note num" id="rv-readout">&nbsp;</div>
+        </div>
+        <h3>Along the track <span class="aside">what it read, and what T2015_449 said there</span></h3>
+        <div id="rv-track-figure"><div class="legend" id="rv-track-legend"></div><div class="chart-box" id="rv-track"><p class="note">The readings appear here as the rover drives.</p></div></div>
         <h3>The rover <span class="aside">its motion and its plan</span></h3>
         <div id="rv-status"></div>
         <h3>What the mission knows <span class="aside">from its readings alone</span></h3>
-        <table><tbody id="rv-knowledge"></tbody></table>
+        <table class="knowledge"><tbody id="rv-knowledge"></tbody></table>
         <div class="keyrow"><button type="button" class="key small" id="rv-calibrate">Calibrate over 20 truths</button></div>
         <div id="rv-calibration"></div>
         <p class="note">The world holds the truth: T2015_449 and a hidden realisation of what it leaves unresolved, to degree 1440, from the law of its spectrum and the seed. The rover's magnetometer, on a 1.5 m mast, reads that truth with 0.5 nT of white noise. The mission's knowledge starts from the truth's own law (mean T2015_449, the unresolved part's covariance) and changes only by those readings, so its errors over its standard deviations are standard normal. The rover drives on the Moon's reference sphere, not on its terrain; the solar wind's field is taken as removed.</p>`;
-      canvas = el.querySelector('#rv-map');
-      el.addEventListener('click', (e) => {
+      canvas = document.getElementById('rv-map');
+      const figure = document.getElementById('rv-figure');
+      const onClick = (e) => {
         const b = e.target.closest('[data-seg] [data-v]');
         if (b) {
           const name = b.parentElement.dataset.seg, v = b.dataset.v;
@@ -158,7 +166,13 @@ export function roverPage(app) {
           refresh();
         }
         if (e.target.id === 'rv-calibrate') page.calibrate();
-      });
+      };
+      el.addEventListener('click', onClick);
+      // The figure takes its keys with it when it is separated; in the page, the page's listener has them.
+      figure.addEventListener('click', (e) => { if (!el.contains(figure)) onClick(e); });
+      new MutationObserver(() => { page.draw(); page.track(true); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      app.separator.attach(figure, { id: 'rover-map', title: "The mission's map", page: 'ROVER', onChange: () => page.draw() });
+      app.separator.attach(document.getElementById('rv-track-figure'), { id: 'rover-track', title: 'Along the track', page: 'ROVER', onChange: () => page.track(true) });
       el.querySelector('#rv-seed').addEventListener('change', (e) => { state.seed = Math.max(0, Math.floor(Number(e.target.value) || 0)); save(); });
       canvas.addEventListener('mousemove', (e) => {
         const r = canvas.getBoundingClientRect();
@@ -200,7 +214,7 @@ export function roverPage(app) {
     render() {
       if (!el) return;
       const s = mission.state;
-      const status = el.querySelector('#rv-status'), line = el.querySelector('#rv-line');
+      const status = el.querySelector('#rv-status'), line = document.getElementById('rv-line');
       if (!s) {
         status.innerHTML = '<p class="note">No mission in the engine yet: choose a site and a plan, and start one.</p>';
         line.innerHTML = '&nbsp;';
@@ -220,6 +234,28 @@ export function roverPage(app) {
       </tbody></table>`;
       page.draw();
       page.knowledge();
+      page.track();
+    },
+    // The readings along the track against the distance driven: what the magnetometer read (|B|), what the prior
+    // (T2015_449) said there, and, revealed, the truth.
+    track(force = false) {
+      const box = document.getElementById('rv-track'), legend = document.getElementById('rv-track-legend');
+      if (!box) return;
+      const rs = mission.readings;
+      // Drawn again when there are new readings, the truth is shown or hidden, or the figure moves.
+      const key = `${rs.length}|${state.reveal}|${rs[0]?.t_s}|${app.separator.isOut('rover-track')}|${document.documentElement.dataset.theme}`;
+      if (!force && key === drawnTrack) return;
+      drawnTrack = key;
+      if (rs.length < 2) { legend.innerHTML = ''; box.innerHTML = '<p class="note">The readings appear here as the rover drives.</p>'; return; }
+      const series = [
+        { label: 'Read', kind: 'points', colour: 'var(--prov-observed)', values: rs.map((r) => r.total_nT) },
+        { label: 'T2015_449', kind: 'line', colour: 'var(--prov-model)', values: rs.map((r) => r.prior_total_nT) },
+      ];
+      if (rs.every((r) => Number.isFinite(r.truth_total_nT))) series.push({ label: 'Truth', kind: 'line', colour: 'var(--ink-2)', dash: '4 3', values: rs.map((r) => r.truth_total_nT) });
+      legend.innerHTML = series.map((x) => `<span><span class="swatch" style="background:${x.colour};${x.kind === 'points' ? 'border-radius:50%' : 'height:3px;vertical-align:3px'}"></span> ${esc(x.label)}</span>`).join('');
+      // In a window of its own the graph is drawn at the window's size, its text at its own.
+      const out = app.separator.isOut('rover-track'), r = box.getBoundingClientRect();
+      alongTrack(box, { x: rs.map((q) => q.driven_m), series, unit: 'nT', xUnit: 'm', title: '|B| at the mast', size: out && r.width > 100 && r.height > 100 ? { w: r.width, h: r.height } : null });
     },
     knowledge() {
       const body = el?.querySelector('#rv-knowledge');
@@ -243,12 +279,12 @@ export function roverPage(app) {
       body.innerHTML = rows.map(([a, b, n]) => `<tr><th>${a}</th><td class="num">${b}</td><td class="note">${n}</td></tr>`).join('');
     },
     legend() {
-      const out = el?.querySelector('#rv-legend');
+      const out = document.getElementById('rv-legend');
       if (!out) return;
       const q = quantityOf(state.quantity);
       const range = map && map[q.values] ? groupRange(map, q) : null;
       if (!range) { out.innerHTML = q.reveal && !state.reveal ? '<span class="note">Reveal the truth to see it.</span>' : ''; return; }
-      const cmap = styles.colourMap(q.map);
+      const cmap = styles.colourMap(mapName(q));
       const digits = Math.abs(range[1] - range[0]) < 5 ? 2 : 1;
       const shared = QUANTITIES.filter((x) => x.group === q.group && map[x.values]).map((x) => x.label);
       out.innerHTML = `<span class="lo">${fmt(range[0], digits)}</span><span class="ramp" style="background:${cmap.gradient()}"></span><span class="hi">${fmt(range[1], digits)}${q.unit ? ` ${q.unit}` : ''}</span>
@@ -257,7 +293,8 @@ export function roverPage(app) {
     draw() {
       if (!el || !canvas) return;
       const box = canvas.parentElement.getBoundingClientRect();
-      const size = Math.max(160, Math.min(box.width || 320, MAP_MAX_PX));
+      // In its display the map is at most MAP_MAX_PX across; in a window of its own, as large as the window allows.
+      const size = app.separator.isOut('rover-map') ? Math.max(160, Math.floor(Math.min(box.width, box.height)) - 2) : Math.max(160, Math.min(box.width || 320, MAP_MAX_PX));
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.style.width = `${size}px`, canvas.style.height = `${size}px`;
       canvas.width = Math.round(size * dpr), canvas.height = Math.round(size * dpr);
@@ -274,13 +311,13 @@ export function roverPage(app) {
       if (!values) {
         // A view of the truth while it is hidden: say so on the map itself.
         g.fillStyle = css('--ink-3');
-        g.font = '13px var(--sans), sans-serif';
+        g.font = `13px ${css('--sans')}`;
         g.textAlign = 'center';
         g.fillText(q.reveal && !state.reveal ? 'Reveal the truth to see it' : 'Not in this map', size / 2, size / 2 - 40);
         g.textAlign = 'start';
       }
       if (values && range) {
-        const cmap = styles.colourMap(q.map);
+        const cmap = styles.colourMap(mapName(q));
         const u = (v) => (v - range[0]) / (range[1] - range[0]);
         const picture = new ImageData(rasterise(map, values, cmap.colour, (v) => Math.min(1, Math.max(0, u(v))), PICTURE, PICTURE), PICTURE, PICTURE);
         const off = document.createElement('canvas');
@@ -293,20 +330,37 @@ export function roverPage(app) {
       // The plan's waypoints, the track, the readings, the rover.
       const s = mission.state;
       if (s) {
-        g.lineWidth = 1;
+        const halo = 'rgba(12, 6, 18, 0.55)';
         s.plan.waypoints.forEach(([lat, lon], i) => {
           const [x, y] = P(lat, lon);
-          g.strokeStyle = css('--orchid');
-          g.fillStyle = css('--orchid');
-          if (i === s.plan.next) g.fillRect(x - 3, y - 3, 6, 6); else g.strokeRect(x - 2.5, y - 2.5, 5, 5);
+          g.lineWidth = 3;
+          g.strokeStyle = halo;
+          g.strokeRect(x - 3, y - 3, 6, 6);
+          g.lineWidth = 1.2;
+          g.strokeStyle = i === s.plan.next ? css('--rose') : 'rgba(255, 245, 252, 0.9)';
+          g.strokeRect(x - 3, y - 3, 6, 6);
+          if (i === s.plan.next) { g.fillStyle = css('--rose'); g.fillRect(x - 2, y - 2, 4, 4); }
         });
-        g.strokeStyle = css('--rose');
-        g.lineWidth = 1.5;
-        g.beginPath();
-        mission.track.forEach(([lat, lon], i) => { const [x, y] = P(lat, lon); if (i) g.lineTo(x, y); else g.moveTo(x, y); });
+        const path = () => { g.beginPath(); mission.track.forEach(([lat, lon], i) => { const [x, y] = P(lat, lon); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); };
+        g.lineJoin = 'round';
+        path();
+        g.lineWidth = 4.5;
+        g.strokeStyle = halo;
         g.stroke();
-        g.fillStyle = css('--rose-deep');
-        for (const r of mission.readings) { const [x, y] = P(r.lat_deg, r.lon_deg); g.beginPath(); g.arc(x, y, 1.6, 0, 2 * Math.PI); g.fill(); }
+        path();
+        g.lineWidth = 1.8;
+        g.strokeStyle = css('--rose');
+        g.stroke();
+        for (const r of mission.readings) {
+          const [x, y] = P(r.lat_deg, r.lon_deg);
+          g.beginPath();
+          g.arc(x, y, 2.1, 0, 2 * Math.PI);
+          g.fillStyle = css('--rose');
+          g.fill();
+          g.lineWidth = 0.8;
+          g.strokeStyle = halo;
+          g.stroke();
+        }
         const r = s.rover, [x, y] = P(r.lat_deg, r.lon_deg), a = r.azimuth_deg * Math.PI / 180;
         const f = [Math.sin(a), -Math.cos(a)], l = [-f[1], f[0]];
         g.fillStyle = css('--ink');
@@ -328,13 +382,13 @@ export function roverPage(app) {
       g.moveTo(10, size - 12);
       g.lineTo(10 + 200 * metres, size - 12);
       g.stroke();
-      g.font = '11px var(--sans), sans-serif';
+      g.font = `11px ${css('--mono')}`;
       g.fillText('200 m', 10, size - 17);
       g.fillText('N ↑', size - 28, 16);
       page.readout();
     },
     readout() {
-      const out = el?.querySelector('#rv-readout');
+      const out = document.getElementById('rv-readout');
       if (!out) return;
       if (!map || !hover) { out.innerHTML = map ? 'Move over the map to read it.' : '&nbsp;'; return; }
       const [x, y, W, H] = hover;

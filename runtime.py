@@ -22,7 +22,8 @@ The physical sources (adapters), each with its provenance, cadence and coverage:
     usgs.quakes    earthquakes of magnitude 2.5 and more of the last day (physical, events: a new one
                    is an event that does not wait for the tick)
     home.station   the user's own stations (observation/sensors), the latest reading of each
-    terrain.probe  the height of the ground at the observer, from the data library's tiles (archive)
+    terrain.probe  the height of the ground at the observer, or the depth of the sea floor beneath it, from
+                   the data library's tiles (archive)
 
 None of them makes up a value: a source that cannot be reached answers why, and the page shows it.
 """
@@ -452,18 +453,31 @@ class TerrainProbe(Adapter):
             values, (land, sea), src = terrain.terrarium().sample(lon, lat, 13)
             first = lambda x: float(np.asarray(x, dtype=float).ravel()[0])
             height = first(values)
-            out = {"height_m": height, "datum": "orthometric (EGM96)", "resolution_m": first(land if height >= 0 else sea), "sources": list(src)}
+            inland = bool(terrain.land().inland(lon, lat)[0])
+            out = {"height_m": height, "datum": "orthometric (EGM96)", "resolution_m": first(land), "sources": list(src)}
             try:
                 out["etopo_m"] = first(terrain.etopo().sample(lon, lat))
             except Exception:
                 pass
+            # SRTM writes water as 0 m: at sea, where Terrarium has 0, the floor is ETOPO's.
+            if height == 0 and not inland and out.get("etopo_m", 0) < 0:
+                height = out["height_m"] = out["etopo_m"]
+                out["resolution_m"] = terrain.etopo().resolution_m
+                out["sources"] = out["sources"] + ["ETOPO 2022, 5′, where Terrarium has 0 m at sea"]
+            # Under the sea: below sea level and not inland (Natural Earth's land, as the tiles tell them).
+            at_sea = bool(height < 0 and not inland)
+            out["sea"] = at_sea
+            if at_sea:
+                out["sea_depth_m"] = -height
+                if out["resolution_m"] == first(land):
+                    out["resolution_m"] = first(sea)
         elif body == "moon":
             h, measured = terrain.lola().sample(lon, lat, 128)
             out = {"height_m": float(h[0]), "datum": "the Moon's sphere of 1737.4 km", "measured_pixel": bool(measured[0]), "resolution_m": 237.0,
                    "sources": ["LOLA LDEM_128 and LDEC_128"]}
         else:
             raise ValueError(f"no terrain of {body}")
-        return self.reading(job, out, {"height_m": "m", "resolution_m": "m", "etopo_m": "m"}, None,
+        return self.reading(job, out, {"height_m": "m", "resolution_m": "m", "etopo_m": "m", "sea_depth_m": "m"}, None,
                             place={"latitude_deg": place["latitude_deg"], "longitude_deg": place["longitude_deg"], "body": body})
 
 
@@ -495,6 +509,7 @@ def virtual_sensors() -> list[dict]:
         {"id": "observer.gravity", "family": "gravimeter.body", "mount": "observer", "period_s": 10, "criticality": 0},
         {"id": "observer.atmosphere", "family": "atmosphere.ussa1976", "mount": "observer", "period_s": 2, "criticality": 1},
         {"id": "observer.radiosonde", "family": "radiosonde.ussa1976", "mount": "observer", "period_s": 30, "criticality": 0},
+        {"id": "observer.column", "family": "seismic_column.crust1", "mount": "observer", "period_s": 30, "criticality": 0},
         {"id": "iss.position", "family": "position.truth", "mount": "satellite:25544", "period_s": 1, "criticality": 1},
         {"id": "iss.sun", "family": "sun.sensor", "mount": "satellite:25544", "period_s": 1, "criticality": 1},
         {"id": "iss.magnetometer", "family": "magnetometer.wmm2025", "mount": "satellite:25544", "period_s": 2, "criticality": 0},

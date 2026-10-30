@@ -34,8 +34,7 @@ export function schedPage(app) {
         <div class="keyrow" id="sc-policies">${POLICIES.map(([o, aging, label], i) => `<button type="button" class="key small" data-policy="${i}">${label}</button>`).join('')}</div>
         <div id="sc-stats"></div>
         <h3>The jobs as they ran <span class="aside">the last five seconds</span></h3>
-        <div id="sc-timeline"></div>
-        <div class="legend"><span><span class="crit c0"></span>display</span><span><span class="crit c1"></span>science</span><span><span class="crit c2"></span>mission</span><span><span class="crit c3"></span>safety</span><span><span class="status critical"></span>outlined: late</span></div>
+        <div id="sc-timeline-figure"><div class="chart-box" id="sc-timeline"></div><div class="legend"><span><span class="crit c0"></span>display</span><span><span class="crit c1"></span>science</span><span><span class="crit c2"></span>mission</span><span><span class="crit c3"></span>safety</span><span><span class="status critical"></span>outlined: late</span></div></div>
         <h3>The declared set, simulated</h3>
         <div class="row"><span>World rate</span><select id="sc-rate"><option value="1">real time</option><option value="60">1 min/s</option><option value="3600">1 h/s</option><option value="86400">1 d/s</option></select>
           <label class="switch"><input type="checkbox" id="sc-burst"><span>a burst of ${BURST.count} events</span></label></div>
@@ -46,6 +45,7 @@ export function schedPage(app) {
         <h3>The operating system's scheduler</h3>
         <div id="sc-kernel"></div>
         <div class="keyrow"><button type="button" class="key small" data-kernel="probe">Time-sharing</button><button type="button" class="key small" data-kernel="fifo">Ask for SCHED_FIFO</button></div>`;
+      app.separator.attach(document.getElementById('sc-timeline-figure'), { id: 'sched-timeline', title: 'The jobs as they ran', page: 'SCHED' });
       el.addEventListener('click', async (e) => {
         const k = e.target.closest('[data-kernel]');
         if (k) {
@@ -102,7 +102,7 @@ export function schedPage(app) {
         const workers = Math.max(1, st.workers || 1);
         const lanes = [...Array(workers)].map((_, i) => ({ label: `cpu ${i}`, match: (r) => r.worker === i }));
         lanes.push({ label: 'i/o', match: (r) => r.worker === 'io' });
-        timeline(el.querySelector('#sc-timeline'), t.records, { lanes, from: t.now - 5, to: t.now });
+        timeline(document.getElementById('sc-timeline'), t.records, { lanes, from: t.now - 5, to: t.now });
       } catch (error) {
         el.querySelector('#sc-stats').innerHTML = `<p class="error">${esc(error.message)}</p>`;
       }

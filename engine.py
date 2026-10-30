@@ -45,7 +45,8 @@ CACHE = ROOT / "data" / "cache"
 
 # The world's sources in the data library's cache: the planets and the Moon (DE440s), the Moon's
 # principal axes (DE440's binary PCK), the Earth's orientation (IERS finals2000A), the leap
-# seconds (IANA) and the geoid (EGM96's 15' grid, the product geoid/egm96-15.pgm).
+# seconds (IANA) and the geoid (EGM96's 15' grid, the product geoid/egm96-15.pgm); the World Magnetic
+# Model, the Moon's crustal field, and the Earth's crust (CRUST1.0, the product crust-crust1).
 SOURCES = {
     "ephemeris": CACHE / "jpl-de440s" / "de440s.bsp",
     "moon_pck": CACHE / "naif-lunar-frames" / "moon_pa_de440_200625.bpc",
@@ -54,6 +55,7 @@ SOURCES = {
     "geoid": CACHE / "products" / "geoid" / "egm96-15.pgm",
     "wmm": CACHE / "noaa-wmm" / "WMM.COF",
     "moon_magnetic": CACHE / "moon-magnetic-t2015" / "T2015_449.sh",
+    "crust1": CACHE / "products" / "crust-crust1.bin",
 }
 
 

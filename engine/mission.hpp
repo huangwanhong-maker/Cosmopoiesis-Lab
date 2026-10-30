@@ -229,8 +229,9 @@ class Mission {
     Json readings = Json::array();
     for (std::size_t i = std::min(readings_from, readings_.size()); i < readings_.size(); i++) {
       const auto& r = readings_[i];
-      Json x = Json::object({{"t_s", r.t}, {"lat_deg", r.lat}, {"lon_deg", r.lon}, {"sensor_nT", vec(r.sensor)}, {"ned_nT", vec(r.ned)}, {"total_nT", norm3(r.ned)}});
-      if (reveal) x.set("truth_ned_nT", vec(r.truth_ned));
+      Json x = Json::object({{"t_s", r.t}, {"driven_m", r.driven}, {"lat_deg", r.lat}, {"lon_deg", r.lon}, {"sensor_nT", vec(r.sensor)}, {"ned_nT", vec(r.ned)},
+                             {"total_nT", norm3(r.ned)}, {"prior_ned_nT", vec(r.prior_ned)}, {"prior_total_nT", norm3(r.prior_ned)}});
+      if (reveal) x.set("truth_ned_nT", vec(r.truth_ned)), x.set("truth_total_nT", norm3(r.truth_ned));
       readings.push(x);
     }
     double square = 0;
@@ -312,8 +313,8 @@ class Mission {
 
  private:
   struct Reading {
-    double t = 0, lat = 0, lon = 0;
-    Vec3 place{}, sensor{}, ned{}, truth_ned{};
+    double t = 0, driven = 0, lat = 0, lon = 0;
+    Vec3 place{}, sensor{}, ned{}, truth_ned{}, prior_ned{};  // prior: T2015_449 where it read
   };
   struct Posterior {
     Vec3 mean{};
@@ -420,8 +421,10 @@ class Mission {
     const Local L = local_at(ll[0] * DEG, ll[1] * DEG);
     r.ned = {dot3(measured, L.north), dot3(measured, L.east), dot3(measured, L.down)};
     r.truth_ned = {dot3(truth, L.north), dot3(truth, L.east), dot3(truth, L.down)};
+    r.driven = odometer();
     // The innovations against the prior mean, and the covariances with every earlier reading.
     const Vec3 mean = field_cartesian(crust_->model(), S.place);
+    r.prior_ned = {dot3(mean, L.north), dot3(mean, L.east), dot3(mean, L.down)};
     std::vector<std::array<std::array<double, 3>, 3>> blocks;
     blocks.reserve(readings_.size());
     for (const auto& q : readings_) blocks.push_back(covariance_.field(S.place, q.place));

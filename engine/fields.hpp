@@ -13,6 +13,9 @@
 //   earth.atmosphere.*         the 1976 standard's temperature, pressure, density and speed of sound,
 //                              carried into space by the height above the world's geoid (EGM96), or
 //                              above the ellipsoid, with a note, when the geoid is not loaded;
+//   earth.interior.*           density and the speeds of P and S waves beneath the ground and the seas:
+//                              CRUST1.0 to the Moho, PREM below (geophysics structure), at each point's
+//                              geodetic place and height above the world's geoid (beneath.hpp);
 //   moon.magnetic.crust        T2015_449 (assimilated);
 //   moon.magnetic.unresolved   the scales it leaves unresolved, to degree 720, drawn with the world's
 //                              seed (synthetic);
@@ -44,6 +47,7 @@
 
 #include <geodesy/gravity/field.hpp>
 #include <geophysics/geomagnetism/field.hpp>
+#include <geophysics/structure/interior.hpp>
 #include <meteorology/atmosphere/field.hpp>
 #include <physis/fields/any.hpp>
 #include <physis/fields/compose.hpp>
@@ -53,6 +57,7 @@
 #include <planetary_science/magnetism/field.hpp>
 #include <science/json.hpp>
 
+#include "beneath.hpp"
 #include "environment.hpp"
 #include "instruments.hpp"
 #include "lunar.hpp"
@@ -101,6 +106,21 @@ struct HeightAboveSea {
     if (!std::isfinite(p.height)) return pf::refused<double>(pf::Quality::invalid, "no height: the point is at the Earth's centre");
     if (!geoid) return pf::valid(p.height, "height above the ellipsoid: the geoid is not loaded");
     return pf::valid(p.height - geoid->undulation(p.latitude, p.longitude));
+  }
+};
+
+// A point of the ITRS as a place of the interior: its geodetic latitude and longitude on WGS 84 and its
+// height above mean sea level (above the ellipsoid, noted, when the geoid is not loaded).
+struct InteriorPlaceOf {
+  std::shared_ptr<const geodesy::geoid::GeoidGrid> geoid;
+  pf::Evaluation<geophysics::structure::InteriorPlace> operator()(const pf::Query<Vec3>& q) const {
+    using geophysics::structure::InteriorPlace;
+    static const geodesy::figure::Ellipsoid wgs84 = geodesy::figure::Ellipsoid::wgs84();
+    if (physis::geometry::norm(q.x) < 1) return pf::refused<InteriorPlace>(pf::Quality::invalid, "at the Earth's centre, where no place has a latitude");
+    const geodesy::figure::Geodetic p = wgs84.geodetic(q.x);
+    if (!std::isfinite(p.height)) return pf::refused<InteriorPlace>(pf::Quality::invalid, "no height: the point is at the Earth's centre");
+    if (!geoid) return pf::valid(InteriorPlace{p.latitude, p.longitude, p.height}, "height above the ellipsoid: the geoid is not loaded");
+    return pf::valid(InteriorPlace{p.latitude, p.longitude, p.height - geoid->undulation(p.latitude, p.longitude)});
   }
 };
 
@@ -163,6 +183,24 @@ class WorldFields {
                         : "the atmosphere above the WGS 84 ellipsoid (the geoid is not loaded), from −5 km′ to 86 km"};
       all_.push_back(fd::scalar_field(pf::pullback<Vec3>(std::move(d), line, fd::HeightAboveSea{w.geoid})));
     }
+    // The interior: CRUST1.0 over PREM, at each point's place and height above mean sea level.
+    namespace gs = geophysics::structure;
+    const auto crust = crust_model(w);
+    for (const gs::InteriorQuantity q : {gs::InteriorQuantity::density, gs::InteriorQuantity::vp, gs::InteriorQuantity::vs}) {
+      static constexpr const char* names[] = {"density", "vp", "vs"};
+      const std::string name = std::string("earth.interior.") + names[static_cast<int>(q)];
+      if (!crust) {
+        all_.push_back(fd::unavailable(name, "The Earth's interior (CRUST1.0 over PREM)", "ITRS", NO_CRUST));
+        continue;
+      }
+      const gs::InteriorField inner(crust, q);
+      pf::Descriptor d = inner.descriptor();
+      d.name = name;
+      d.frame = "ITRS";
+      d.base.about = w.geoid ? "the Earth beneath its ground and seas, to its centre: depth below mean sea level (EGM96) along the normal of WGS 84"
+                             : "the Earth beneath its ground and seas, to its centre: depth below the WGS 84 ellipsoid (the geoid is not loaded)";
+      all_.push_back(fd::scalar_field(pf::pullback<Vec3>(std::move(d), inner, fd::InteriorPlaceOf{w.geoid})));
+    }
     // The Moon's crustal field: the model, what it leaves unresolved, and their sum.
     const auto moon = lunar_field(w);
     const std::string no_moon = "the Moon's crustal model is not loaded (python data/acquisition/fetch.py moon-magnetic-t2015)";
@@ -218,7 +256,7 @@ inline const WorldFields& fields_of(const World& w) {
   };
   static std::map<const World*, Held> held;
   std::vector<std::shared_ptr<const void>> key{w.geoid};
-  for (const char* m : {"wmm", "moon_magnetic"}) {
+  for (const char* m : {"wmm", "moon_magnetic", "crust1"}) {
     const auto it = w.models.find(m);
     key.push_back(it == w.models.end() ? nullptr : it->second);
   }
