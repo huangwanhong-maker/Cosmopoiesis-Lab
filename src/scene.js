@@ -398,6 +398,14 @@ void main() {
     this.onChange();
   }
 
+  // A feature moved to another point of its frame (m), as it is.
+  move(key, centre) {
+    const f = this.features.get(key);
+    if (!f) return;
+    f.centre = centre;
+    this.onChange();
+  }
+
   // A feature removed, its geometries and materials freed.
   drop(key) {
     const f = this.features.get(key);

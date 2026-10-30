@@ -482,6 +482,11 @@ svg.chart .observer-mark { fill: var(--orchid); }
 .rover-map { display: flex; justify-content: center; align-items: center; border: 1px solid var(--hair-2); border-radius: var(--radius-s); background: var(--panel-solid); margin: 6px 0 2px; overflow: hidden; }
 .rover-map canvas { display: block; cursor: crosshair; }
 :root[data-theme="day"] .rover-map { background: rgba(125, 84, 171, 0.06); }
+.robot-side { display: flex; justify-content: center; align-items: center; border: 1px solid var(--hair-2); border-radius: var(--radius-s); background: var(--panel-solid); margin: 6px 0 2px; overflow: hidden; }
+.robot-side canvas { display: block; }
+:root[data-theme="day"] .robot-side { background: rgba(125, 84, 171, 0.06); }
+.refusal { display: flex; gap: 9px; align-items: baseline; margin: 6px 0; font-size: 12.5px; color: var(--ink-2); }
+.refusal .lamp { flex: none; }
 .cube-legend { display: grid; grid-template-columns: auto 1fr auto; gap: 3px 9px; align-items: center; font-size: 12px; margin: 5px 0 2px; }
 .cube-legend .ramp { height: 6px; }
 .cube-legend .lo, .cube-legend .hi { font-weight: 600; white-space: nowrap; }
@@ -526,6 +531,7 @@ svg.chart .observer-mark { fill: var(--orchid); }
 .float .float-body > .figure { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .float .float-body .cube-view { flex: 1; aspect-ratio: auto; min-height: 120px; margin: 0 0 4px; }
 .float .float-body .rover-map { flex: 1; min-height: 120px; margin: 4px 0 2px; }
+.float .float-body .robot-side { flex: 1; min-height: 120px; margin: 4px 0 2px; }
 .float .float-body .skyplot-box { max-width: none; flex: 1; }
 .float .float-body .charts-2 { flex: 1; }
 .float .float-body .chart-box { flex: 1; min-height: 120px; display: flex; flex-direction: column; justify-content: center; }
@@ -631,3 +637,16 @@ svg.chart .observer-mark { fill: var(--orchid); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* The fields at a point (POINT, decision 0012): a block each, the value across the display's width. */
+.fields-here .field-row { padding: 7px 0 6px; border-bottom: 1px solid var(--hair); }
+.fields-here .field-row .head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.fields-here .field-row .title { color: var(--ink); font-size: 13px; }
+.fields-here .field-row .name { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); margin: 1px 0 3px; overflow-wrap: anywhere; }
+.fields-here .field-row .name code { font-family: var(--mono); background: none; padding: 0; color: var(--ink-3); }
+.fields-here .field-row .val { font-size: 12.5px; color: var(--ink-2); }
+.fields-here .field-row .val .n { font-family: var(--sans); font-variant-numeric: tabular-nums; font-size: 15px; color: var(--ink); margin-right: 2px; }
+.fields-here .field-row .val .u { margin-right: 10px; }
+.fields-here .field-row .sub, .fields-here .field-row .why { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
+.fields-here-none { margin: 8px 0 4px; }
+.fields-here-none summary { cursor: pointer; color: var(--ink-2); font-size: 12.5px; }

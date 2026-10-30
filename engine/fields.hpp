@@ -19,7 +19,14 @@
 //   moon.magnetic.crust        T2015_449 (assimilated);
 //   moon.magnetic.unresolved   the scales it leaves unresolved, to degree 720, drawn with the world's
 //                              seed (synthetic);
-//   moon.magnetic              their sum, of the more derived provenance of the two (synthetic).
+//   moon.magnetic              their sum, of the more derived provenance of the two (synthetic);
+//   moon.ground.*              the ground as a foot meets it (planetary-science surfaces, ADR 0059): the
+//                              regolith's friction, the load that presses a foot 1 mm in, the contact's
+//                              damping, each presumed (model) and realised with the world's seed (synthetic);
+//   earth.ocean.*              the upper ocean's water as a body in it meets it (oceanography water, ADR 0059):
+//                              its density and its current, presumed and realised with the world's seed;
+//   earth.ground.*             the land's ground as a foot meets it (geophysics ground, ADR 0059): its class by
+//                              CRUST1.0, its friction, load at 1 mm and damping, presumed and realised.
 //
 // A field whose model the world has not loaded is listed with the reason, as a declared instrument is,
 // not left out. Positions are on the axes of the field's frame (ITRS, MOON_ME), in metres, and a
@@ -38,6 +45,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -55,6 +63,9 @@
 #include <physis/fields/reductions.hpp>
 #include <physis/fields/sampling.hpp>
 #include <planetary_science/magnetism/field.hpp>
+#include <geophysics/ground/presumed.hpp>
+#include <oceanography/water/presumed.hpp>
+#include <planetary_science/surfaces/regolith.hpp>
 #include <science/json.hpp>
 
 #include "beneath.hpp"
@@ -223,9 +234,44 @@ class WorldFields {
     } else {
       for (const char* name : {"moon.magnetic.crust", "moon.magnetic.unresolved", "moon.magnetic"}) all_.push_back(fd::unavailable(name, "The Moon's crustal field", "MOON_ME", no_moon));
     }
+    add_ground(w.seed);
+    add_ocean(w.seed);
+    // The land's ground: its class by CRUST1.0, each class's presumed law and its realisation.
+    {
+      namespace gg = geophysics::ground;
+      if (crust) {
+        const auto earth = std::make_shared<const gg::EarthGround>(crust, w.seed);
+        for (const auto q : {gg::GroundField::Quantity::friction, gg::GroundField::Quantity::load, gg::GroundField::Quantity::damping})
+          for (const bool presumed : {false, true}) all_.push_back(fd::scalar_field(gg::GroundField(earth, q, presumed)));
+      } else {
+        for (const char* name : {"earth.ground.friction", "earth.ground.friction.presumed", "earth.ground.load", "earth.ground.load.presumed", "earth.ground.damping",
+                                 "earth.ground.damping.presumed"})
+          all_.push_back(fd::unavailable(name, "The Earth's ground as a foot meets it", "ITRS", NO_CRUST));
+      }
+    }
+  }
+
+  // The upper ocean's water: its density and its current, presumed and realised for the world's seed.
+  void add_ocean(std::uint64_t seed) {
+    namespace ow = oceanography::water;
+    namespace fd = fields_detail;
+    const auto ocean = std::make_shared<const ow::UpperOcean>(ow::WaterLaw{}, seed);
+    all_.push_back(fd::scalar_field(ow::DensityField(ocean, false)));
+    all_.push_back(fd::scalar_field(ow::DensityField(ocean, true)));
+    all_.push_back(fd::vector_field(ow::CurrentField(ocean, false)));
+    all_.push_back(fd::vector_field(ow::CurrentField(ocean, true)));
   }
 
   static constexpr int UNRESOLVED_DEGREE = 720;
+
+  // The Moon's ground: the presumed contact law of its regolith, and its realisation for the world's seed.
+  void add_ground(std::uint64_t seed) {
+    namespace ps = planetary_science::surfaces;
+    namespace fd = fields_detail;
+    const auto ground = std::make_shared<const ps::RegolithGround>(ps::RegolithLaw{}, seed);
+    for (const auto q : {ps::RegolithField::Quantity::friction, ps::RegolithField::Quantity::load, ps::RegolithField::Quantity::damping})
+      for (const auto k : {ps::RegolithField::Kind::realised, ps::RegolithField::Kind::presumed}) all_.push_back(fd::scalar_field(ps::RegolithField(ground, q, k)));
+  }
 
   const std::vector<WorldField>& all() const { return all_; }
   const WorldField& operator[](const std::string& name) const {
@@ -810,6 +856,71 @@ inline Json field_volume(const World& w, const VolumeRequest& q, const MountStat
   answer.set("threads", 1.0);
   answer.set("elapsed_s", std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
   return answer;
+}
+
+// ---- every field at one event ---------------------------------------------------------------------------
+
+// {"op": "field.at", "at": address, "time"?}: every field of the world at one event (the integrated field of
+// the formalism's §3 at a point: each of its parts, with its unit, frame and provenance), read where the
+// event is in each field's frame; a vector also on the local east, north and up of the body it is on; a
+// field that has no value there says why, and one whose model is not loaded says so.
+inline Json field_at(const WorldFields& fs, const MountState& m, const mt::Instant& t, const Spacetime& s) {
+  const double tt = tt_seconds(t);
+  const auto& g = s.catalogue().graph();
+  // The local axes of the body the event is on (its geodetic normal), for the vectors of its fixed frame.
+  const double la = m.geodetic.latitude, lo = m.geodetic.longitude;
+  const Vec3 E{-std::sin(lo), std::cos(lo), 0.0}, N{-std::sin(la) * std::cos(lo), -std::sin(la) * std::sin(lo), std::cos(la)},
+      U{std::cos(la) * std::cos(lo), std::cos(la) * std::sin(lo), std::sin(la)};
+  const auto dot = [](const Vec3& a, const Vec3& b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+  Json list = Json::array();
+  for (const auto& f : fs.all()) {
+    const pf::Descriptor& d = f.descriptor;
+    Json j = Json::object({{"name", d.name}, {"title", d.title}, {"frame", d.frame}});
+    if (!f.available()) {
+      j.set("missing", f.missing);
+      list.push(j);
+      continue;
+    }
+    j.set("provenance", pf::name(d.provenance));
+    j.set("unit", physis::units::symbol(d.fibre.dimension));
+    j.set("kind", pf::name(d.fibre.kind));
+    j.set("source", d.source);
+    Vec3 x;
+    try {
+      x = d.frame == m.fixed_frame ? m.fixed : g.transform("ICRS", d.frame, t).position(m.icrs);
+    } catch (const std::exception& e) {
+      j.set("quality", "invalid");
+      j.set("reason", std::string("the event cannot be carried into ") + d.frame + ": " + e.what());
+      list.push(j);
+      continue;
+    }
+    const auto put = [&](const auto& e) {
+      j.set("quality", pf::name(e.quality));
+      if (!e.reason.empty()) j.set("reason", std::string(e.reason));
+      if (!e.note.empty()) j.set("note", std::string(e.note));
+    };
+    if (f.vector) {
+      const auto e = f.vector.at({tt, x});
+      put(e);
+      if (e.ok()) {
+        const Vec3& v = e.value;
+        j.set("value", Json::array({v[0], v[1], v[2]}));
+        j.set("magnitude", physis::geometry::norm(v));
+        if (d.frame == m.fixed_frame && !m.body.empty()) j.set("enu", Json::array({dot(v, E), dot(v, N), dot(v, U)}));
+      }
+    } else {
+      const auto e = f.scalar.at({tt, x});
+      put(e);
+      if (e.ok()) j.set("value", e.value);
+    }
+    list.push(j);
+  }
+  Json at = Json::object({{"address", m.address}, {"body", m.body}, {"frame", m.fixed_frame}, {"on_body", m.on_body},
+                          {"position_m", Json::array({m.fixed[0], m.fixed[1], m.fixed[2]})}});
+  if (!m.body.empty())
+    at.set("geodetic", Json::object({{"latitude_deg", m.geodetic.latitude * 180 / std::numbers::pi}, {"longitude_deg", m.geodetic.longitude * 180 / std::numbers::pi},
+                                     {"height_m", m.geodetic.height}}));
+  return Json::object({{"at", at}, {"time", instant_json(t, s)}, {"fields", list}});
 }
 
 }  // namespace cosmopoiesis

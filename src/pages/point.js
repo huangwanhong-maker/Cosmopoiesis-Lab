@@ -2,12 +2,14 @@
 //
 // A point is chosen by a click on any body, by a name, or by an address. It is shown first as a
 // place (its coordinates on the body's figure, the named feature it lies in), then as seen from the
-// observer, whose instruments read the environment (they follow the point unless told not to), and
-// then in every frame and chart of the catalogue, each answer an address that reads back to the same
-// point (navigation/frames/address.hpp). The view's own target, the camera, and the language of
-// addresses with its examples close the page.
+// observer, whose instruments read the environment (they follow the point unless told not to), then
+// the world's fields there (every field of the world at the point, each of its components with its unit
+// and provenance: the integrated field at a point, decision 0012), and then in every frame and chart of
+// the catalogue, each answer an address that reads back to the same point (navigation/frames/address.hpp).
+// The view's own target, the camera, and the language of addresses with its examples close the page.
 
 import { engine } from '../api.js';
+import { provenanceTag } from '../busclient.js';
 import { esc, fmt, length, ttText, latText, lonText } from '../format.js';
 
 const DEG = 180 / Math.PI;
@@ -63,6 +65,9 @@ export function pointPage(app) {
         <label class="switch"><input type="checkbox" id="pt-follow"><span>The observer follows the point chosen <small>a click on a body then moves the observer and its instruments there</small></span></label>
         <h3>From the observer</h3>
         <div id="pt-seen"><p class="note">The observer's instruments read where it stands; the point is seen from it.</p></div>
+        <h3>The fields here <span class="aside">every field of the world at the point, each component</span></h3>
+        <div id="pt-fields"><p class="note">Choose a point to read the world's fields there.</p></div>
+        <div class="keyrow"><button type="button" class="key small" id="pt-fields-read">Read again</button></div>
         <h3>In every frame <span class="aside">each an address of the same point</span></h3>
         <details id="pt-frames-box"><summary>The frames and charts of the catalogue <small id="pt-frames-count"></small></summary><div id="pt-frames"></div></details>
         <h3>The view <span class="aside" id="pt-focus"></span></h3>
@@ -92,6 +97,7 @@ export function pointPage(app) {
         if (e.target.id === 'pt-field' && p) app.openField?.('point');
         if (e.target.id === 'pt-fly' && p) app.flyToPoint?.();
         if (e.target.id === 'pt-copy' && p) app.putAddress(p.canonical || p.address);
+        if (e.target.id === 'pt-fields-read' && p) page.fields(p);
       });
       el.querySelector('#pt-grammar-box').addEventListener('toggle', (e) => { if (e.target.open && !grammarShown) { grammarShown = true; grammar(); } });
       page.render();
@@ -169,6 +175,18 @@ export function pointPage(app) {
       } catch (error) {
         box.innerHTML = `<p class="error">${esc(error.message)}</p>`;
       }
+      page.fields(point);
+    },
+    // Every field of the world at the point, at the world's instant: each of its components.
+    async fields(point) {
+      const box = el.querySelector('#pt-fields');
+      box.innerHTML = '<p class="note">reading the world\'s fields there…</p>';
+      try {
+        const a = await engine({ op: 'field.at', at: point.canonical || point.address, time: ttText(app.clock.now()) });
+        box.innerHTML = fieldsHere(a);
+      } catch (error) {
+        box.innerHTML = `<p class="error">${esc(error.message)}</p>`;
+      }
     },
     // The observer moved: the point is seen from its new place.
     showObserver() { if (app.picked) page.choose(app.picked); else page.render(); },
@@ -188,6 +206,36 @@ export function pointPage(app) {
     }
   }
   return page;
+}
+
+// The world's fields at a point (the engine's field.at), each a block: its title and provenance, its name and
+// frame, and its value: a scalar with its unit; a vector on the local east, north and up of the body the
+// point is on (else on its frame's axes) with its length. Those with a value come first; those without one
+// there (out of their base, or their model not loaded) follow under a fold, each with why. Teslas in nT.
+export function fieldsHere(a) {
+  const shown = (x) => {
+    if (!Number.isFinite(x)) return '—';
+    const m = Math.abs(x);
+    return fmt(x, m === 0 ? 0 : m >= 1000 ? 0 : m >= 100 ? 1 : m >= 10 ? 2 : 3);
+  };
+  const block = (f) => {
+    const head = `<div class="head"><span class="title">${esc(f.title)}</span>${f.provenance ? provenanceTag(f.provenance) : ''}</div>
+      <div class="name"><code>${esc(f.name)}</code>${f.frame ? ` · ${esc(f.frame)}` : ''}</div>`;
+    if (f.missing) return `<div class="field-row">${head}<div class="why">${esc(f.missing)}</div></div>`;
+    if (f.quality !== 'valid') return `<div class="field-row">${head}<div class="why">${esc(f.quality)}: ${esc(f.reason || '')}</div></div>`;
+    const nano = f.unit === 'T', unit = nano ? 'nT' : f.unit, k = nano ? 1e9 : 1;
+    let value;
+    if (Array.isArray(f.value)) {
+      const [c, axes] = f.enu ? [f.enu, ['east', 'north', 'up']] : [f.value, ['x', 'y', 'z']];
+      value = `${c.map((x, i) => `<span class="n">${shown(k * x)}</span> <span class="u">${axes[i]}</span>`).join(' ')}
+        <div class="sub">|v| <span class="n">${shown(k * f.magnitude)}</span> ${esc(unit)}${f.enu ? '' : ` · on the axes of ${esc(f.frame)}`}</div>`;
+    } else value = `<span class="n">${shown(k * f.value)}</span> <span class="u">${esc(unit)}</span>`;
+    return `<div class="field-row">${head}<div class="val">${value}</div>${f.note ? `<div class="why">${esc(f.note)}</div>` : ''}</div>`;
+  };
+  const valid = a.fields.filter((f) => f.quality === 'valid'), others = a.fields.filter((f) => f.quality !== 'valid');
+  return `<div class="fields-here">${valid.map(block).join('')}</div>
+    ${others.length ? `<details class="fields-here-none"><summary>${others.length} fields have no value here <small>out of their base, or their model not loaded</small></summary><div class="fields-here">${others.map(block).join('')}</div></details>` : ''}
+    <p class="note">${valid.length} of ${a.fields.length} fields have a value here${a.time?.utc ? `, at ${esc(String(a.time.utc).replace('T', ' ').slice(0, 19))} UTC` : ''}. A vector is given on the local east, north and up of the body the point is on. Each field is its domain's model, read where the point is in the field's own frame.</p>`;
 }
 
 const POINT_GLYPH = '<svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2" class="glyph-point"/><path d="M8 0.5v4M8 11.5v4M0.5 8h4M11.5 8h4" class="glyph-point"/></svg>';

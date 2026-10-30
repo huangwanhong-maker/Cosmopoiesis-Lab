@@ -47,6 +47,9 @@
 //    "synthetic"?: bool, "synthetic_degree"?: n, "seed"?: n}
 //                                                     the Moon's crustal field on a sphere: moon.magnetic.crust, or
 //                                                     with unresolved scales of a degree and seed, sampled
+//   {"op": "field.at", "at": address, "time"?: text}    every field of the world at one event: each one's value
+//                                                     with its unit, frame and provenance (a vector also on the
+//                                                     local east, north and up), or why it has none there
 //   {"op": "probe_volume", "at": address | "observer", "time": text, "family": f | "field": name, "edge_m": m, "n": 2…24,
 //    "quantities"?: [names], "settings"?: {...}, "encoding"?: "json" | "f32", "session"?: id, "threads"?: k}
 //                                                     a family, or a field of the world (fields.hpp), read in the
@@ -71,6 +74,15 @@
 //                                                     a rover surveying the Moon's crustal field and the mission's
 //                                                     knowledge of it (mission.hpp): started, stepped by its clock,
 //                                                     its state and the posterior's map; run whole in one request
+//   {"op": "robot.models"}
+//   {"op": "robot.start", "session"?: id, "config": {"model", "body", "lat_deg", "lon_deg", "azimuth_deg", "method"}}
+//   {"op": "robot.command", "session"?: id, "behaviour": "stand" | "hop" | "stop", "speed_m_s"?: v, "height_m"?: h}
+//   {"op": "robot.step", "session"?: id, "seconds": s, "since_frame"?: i}
+//   {"op": "robot.state" | "robot.stop", "session"?: id}
+//   {"op": "robot.run", "config": {...}, "commands": [{"t_s", "behaviour", "speed_m_s"?, "height_m"?}], "seconds": s}
+//                                                     a robot with joints on a body at a site (robot.hpp): the
+//                                                     robotics domain's rabbit, its behaviours asked, its motion
+//                                                     advanced by the method chosen, its frames for drawing
 // Times are text: ISO 8601 with a scale ("2026-10-28T12:00:00Z", "2026-10-28 12:00 TT"), "JD …",
 // "MJD …", or "unix:<seconds>" for UTC from a clock.
 
@@ -101,6 +113,7 @@
 #include "lunar.hpp"
 #include "instruments.hpp"
 #include "mission.hpp"
+#include "robot.hpp"
 #include "neighbourhood.hpp"
 #include "satellites.hpp"
 #include "spacetime.hpp"
@@ -505,6 +518,37 @@ Json mission_answer(const Json& r) {
   throw std::invalid_argument("unknown op: " + op);
 }
 
+// The robots of a serving engine (robot.hpp), by session.
+std::map<std::string, std::unique_ptr<robot::Robot>> robots;
+
+Json robot_answer(const Json& r) {
+  const std::string op = r["op"].text();
+  const std::string id = r["session"].text("default");
+  if (op == "robot.models") return robot::catalogue();
+  if (op == "robot.run") return robot::run(r);
+  if (op == "robot.start") {
+    auto m = robot::make(r["config"], r["sources"]);
+    Json a = m->state(false);
+    a.set("frames", m->frames(0));
+    robots[id] = std::move(m);
+    return a;
+  }
+  const auto it = robots.find(id);
+  if (it == robots.end()) throw std::invalid_argument("robot: no robot \"" + id + "\" in this engine; start one (robot.start)");
+  robot::Robot& m = *it->second;
+  const std::size_t since = r["since_frame"].is_number() ? std::size_t(std::clamp(r["since_frame"].as_number(), 0.0, 1e12)) : 0;
+  if (op == "robot.command") return m.command(r);
+  const bool reveal = r["reveal"].is_bool() && r["reveal"].as_bool();
+  const std::size_t since_reading = r["since_reading"].is_number() ? std::size_t(std::clamp(r["since_reading"].as_number(), 0.0, 1e12)) : 0;
+  if (op == "robot.step") return m.step(r["seconds"].is_number() ? r["seconds"].as_number() : 0.0, since, since_reading, reveal);
+  if (op == "robot.state") return m.state(reveal);
+  if (op == "robot.stop") {
+    robots.erase(it);
+    return Json::object({{"stopped", id}});
+  }
+  throw std::invalid_argument("unknown op: " + op);
+}
+
 Json event_json(const navigation::frames::Event& e) {
   return Json::object({{"frame", e.frame}, {"position_m", vec(e.position)}, {"direction", e.direction}, {"body", e.body}});
 }
@@ -522,6 +566,7 @@ Json expression_json(const navigation::frames::Expression& x) {
 
 Json answer(const Json& r) {
   const std::string op = r["op"].text();
+  if (op.rfind("robot.", 0) == 0) return robot_answer(r);  // a robot needs no world's kernels
   Spacetime& s = world(r);
   if (op == "bodies") {
     namespace nf = navigation::frames;
@@ -654,6 +699,18 @@ Json answer(const Json& r) {
                          {"qualities", Json::array({"valid", "outside", "missing", "invalid"})}});
   }
   if (op == "fields") return fields_answer(fields_of(field_world(s, r)));
+  if (op == "field.at") {
+    World& w = field_world(s, r);
+    const mt::Instant t = instant_of(s, r["time"]);
+    MountState m;
+    try {
+      m = mount_state(w, r["at"].text(), t);
+    } catch (const Unavailable& e) {
+      throw std::invalid_argument(std::string("field.at: ") + e.what());
+    }
+    if (m.address.empty()) throw std::invalid_argument("field.at: an event, as an address (\"at\")");
+    return field_at(fields_of(w), m, t, s);
+  }
   if (op == "field.sample" || op == "field.curves") {
     const WorldFields& fs = fields_of(field_world(s, r));
     const mt::Instant t = field_instant(s, r, fs[r["field"].text()]);

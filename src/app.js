@@ -42,6 +42,7 @@ import { busPage } from './pages/bus.js';
 import { instrPage } from './pages/instr.js';
 import { schedPage } from './pages/sched.js';
 import { roverPage } from './pages/rover.js';
+import { robotPage } from './pages/robot.js';
 import { Separator } from './separate.js';
 
 const { cartesian, geodetic, IMAGERY, loadStarProduct, apply, applyTransposed, localFrame } = globe;
@@ -731,12 +732,13 @@ async function main() {
     ['FRAMES', 'The catalogue of frames and its loops', 'engineering'], ['SYS', 'The engine, the data, the messages', 'engineering']];
   const RIGHT = [['ENV', 'The environment the observer\'s instruments read', 'science'], ['FIELD', 'The field about a point, as a cube filled with colour', 'science'], ['INSTR', 'The instruments, their readings first', 'both'],
     ['ROVER', 'A rover surveying the Moon\'s field, and what its mission knows', 'science'],
+    ['ROBOT', 'Bodies with joints: a rabbit on the Moon, a fish in the ocean, a dog on the ground', 'science'],
     ['BUS', 'Every stream of readings, with its envelope', 'engineering'], ['SCHED', 'The acquisition\'s scheduling', 'engineering']];
   app.separator = new Separator();
   app.console.display('left', LEFT);
   app.console.display('right', RIGHT);
   app.pages = { POINT: pointPage(app), TIME: timePage(app), FRAMES: framesPage(app), LAYERS: layersPage(app), SYS: sysPage(app),
-    ENV: envPage(app), FIELD: fieldPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app), ROVER: roverPage(app) };
+    ENV: envPage(app), FIELD: fieldPage(app), BUS: busPage(app), INSTR: instrPage(app), SCHED: schedPage(app), ROVER: roverPage(app), ROBOT: robotPage(app) };
   for (const [k] of LEFT) app.console.register('left', k, app.pages[k]);
   for (const [k] of RIGHT) app.console.register('right', k, app.pages[k]);
   app.isShown = (k) => app.console.isShown(k) || app.separator.pageHasOut(k);  // a page whose figure is out is kept current

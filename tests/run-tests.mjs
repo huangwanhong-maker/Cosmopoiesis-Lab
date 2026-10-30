@@ -16,7 +16,8 @@
 // crust at both fidelities and by both plans, the truth hidden until revealed, and the knowledge's
 // calibration over many truths; and the world beneath (decision 0010): the section's geometry as the
 // page draws it, the engine's section with its events placed along and across, and the interior as
-// fields, held to PREM as ObsPy tabulates it.
+// fields, held to PREM as ObsPy tabulates it; and a robot (decision 0011): the page's arithmetic of its plane, its
+// links and its frames, and the engine's rabbit standing, hopping forward and refused on the Earth.
 // The science itself is checked by the domains metrology, geodesy, astronomy, geophysics,
 // meteorology and navigation and by physis and calx; the drawing by the shared visualization layer.
 // Run from the repository root:  node applications/cosmopoiesis-lab/tests/run-tests.mjs
@@ -39,6 +40,7 @@ import { analysisHtml } from '../src/pages/sched.js';
 import { QUANTITIES, emptyMission, groupRange, merge, offsetMetres, project, rasterise, unproject, valueAt, whitenedBand } from '../src/mission.js';
 import { besidePlacement, clampPlacement } from '../src/separate.js';
 import { compass, materialAt, nearestSample, projection, sectionLegend, viewRange } from '../src/beneath.js';
+import { DEG as RDEG, Playback, between, fixedToPlane, groundTicks, linkOutline, onLink, planeAxes, planeToFixed, sideView } from '../src/robot.js';
 
 const { assert, check, skip, done } = suite();
 const APP = resolve(ROOT, 'applications/cosmopoiesis-lab');
@@ -231,6 +233,42 @@ assert('provenance: five classes of reading, an unknown one read as a model',
   assert('beneath: the compass of an azimuth', compass(0) === 'N' && compass(90) === 'E' && compass(270) === 'W' && compass(135) === 'SE' && compass(-90) === 'W');
   const big = besidePlacement({ left: 1010, right: 1390, top: 500 }, 1400, 900, { room: { left: 404, right: 996 }, w: 760, h: 620 });
   assert('separate: a figure that asks for a larger first window has it, within the stage', big.w === 592 && big.h === 620 && big.x === 404, JSON.stringify(big));
+}
+
+// ---- a robot, as the page draws it (src/robot.js, decision 0011) ------------------------------------------------
+{
+  const p = onLink([0.1, 0.2, Math.PI / 2], [0.3, 0.05]);
+  check('robot: a link\'s point o + R(θ) p, turned a right angle (m)', Math.hypot(p[0] - (0.1 - 0.05), p[1] - (0.2 + 0.3)), 1e-15);
+  const box = linkOutline({ shape: { kind: 'box', from_m: [-0.15, 0], length_m: 0.3, thickness_m: 0.1 } }, [0, 0, 0.3]);
+  const side = (i, j) => Math.hypot(box.corners[i][0] - box.corners[j][0], box.corners[i][1] - box.corners[j][1]);
+  check('robot: a box turned keeps its length and thickness (m)', Math.max(Math.abs(side(0, 1) - 0.3), Math.abs(side(1, 2) - 0.1)), 1e-15);
+  const cap = linkOutline({ shape: { kind: 'capsule', from_m: [0, 0], length_m: 0.12, thickness_m: 0.022 } }, [0.05, 0.1, -0.4]);
+  check('robot: a capsule from its joint along its axis (m)', Math.hypot(cap.a[0] - 0.05, cap.a[1] - 0.1) + Math.abs(Math.hypot(cap.b[0] - cap.a[0], cap.b[1] - cap.a[1]) - 0.12) + Math.abs(cap.r - 0.011), 1e-15);
+  const ax = planeAxes(-59 * RDEG, 7.5 * RDEG, 90 * RDEG);
+  const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const FxL = cross(ax.F, ax.L);
+  check('robot: the plane\'s axes orthonormal and right-handed, F × L = U',
+    Math.max(Math.abs(dot(ax.F, ax.F) - 1), Math.abs(dot(ax.L, ax.L) - 1), Math.abs(dot(ax.F, ax.L)), Math.abs(dot(ax.F, ax.U)), Math.hypot(FxL[0] - ax.U[0], FxL[1] - ax.U[1], FxL[2] - ax.U[2])), 1e-15);
+  const east = [-Math.sin(-59 * RDEG), Math.cos(-59 * RDEG), 0];
+  check('robot: heading 90°, forward is east and left is north', Math.hypot(...ax.F.map((v, i) => v - east[i])) + Math.abs(fixedToPlane(ax, [0, 0, 1])[1] - Math.cos(7.5 * RDEG)), 1e-15);
+  const o = [1737.4e3, 0, 0], q = planeToFixed(ax, o, [0.3, -0.05, 0.2]), back = fixedToPlane(ax, q.map((v, i) => v - o[i]));
+  check('robot: a point of the plane to the body\'s frame and back (m)', Math.hypot(back[0] - 0.3, back[1] + 0.05, back[2] - 0.2), 1e-9);
+  check('robot: the side view looks along the heading less a right angle, the robot moving to the right', sideView(0, 0, 0, 90 * RDEG).heading, 1e-15);
+  const f = (i, t, th) => ({ i, t_s: t, poses: [[t, 0.15, th]], com_m: [t, 0.15], q: [t], phase: i < 3 ? 'flight' : 'compression' });
+  const mid = between(f(0, 0, 3.1), f(1, 1, -3.1), 0.5);
+  check('robot: an angle between frames the short way round, across ±π (rad)', Math.abs(Math.cos(mid.poses[0][2]) + 1) + Math.abs(Math.sin(mid.poses[0][2])), 1e-9);
+  const play = new Playback({ lag: 0.3, keep: 2 });
+  play.add([f(0, 0, 0), f(1, 1 / 60, 0), f(2, 2 / 60, 0)]);
+  play.add([f(1, 1 / 60, 0), f(3, 3 / 60, 0)]);
+  assert('robot: frames gathered once each, the next asked after the last', play.frames.length === 4 && play.since === 4, `${play.frames.length} frames, next ${play.since}`);
+  for (let k = 4; k < 300; k++) play.add([f(k, k / 60, 0)]);
+  assert('robot: the frames kept are the last seconds\' (2 s here)', play.frames[0].t_s >= 299 / 60 - 2 - 1e-9 && play.frames.length <= 122, `${play.frames.length} from ${play.frames[0].t_s}`);
+  const a = play.advance(0.016);
+  check('robot: played the lag behind the newest (s)', play.newest.t_s - a.t_s - 0.3, 1e-12);
+  for (let k = 0; k < 100; k++) play.advance(0.016);
+  check('robot: and never ahead of it (s)', play.t - play.newest.t_s, 0);
+  assert('robot: the ground ticked every 10 cm', groundTicks(-0.05, 0.32, 0.1).join() === '0,0.1,0.2,0.3', groundTicks(-0.05, 0.32, 0.1).join());
 }
 
 // ---- the field's cube, as the page reckons it (decision 0006) --------------------------------------------------
@@ -577,8 +615,11 @@ if (!state || !state.built || !state.data.ephemeris) {
     const byName = new Map(cat.map((f) => [f.name, f]));
     const names = ['earth.magnetic', 'earth.magnetic.core', 'earth.gravity.normal', 'earth.atmosphere.temperature', 'earth.atmosphere.pressure',
       'earth.atmosphere.density', 'earth.atmosphere.speed_of_sound', 'earth.interior.density', 'earth.interior.vp', 'earth.interior.vs',
-      'moon.magnetic.crust', 'moon.magnetic.unresolved', 'moon.magnetic'];
-    assert('fields: the world holds thirteen fields, the domains\' models, each with its descriptor', names.every((n) => byName.has(n)) && cat.length === 13, cat.map((f) => f.name).join(', '));
+      'moon.magnetic.crust', 'moon.magnetic.unresolved', 'moon.magnetic',
+      'moon.ground.friction', 'moon.ground.friction.presumed', 'moon.ground.load', 'moon.ground.load.presumed', 'moon.ground.damping', 'moon.ground.damping.presumed',
+      'earth.ocean.density', 'earth.ocean.density.presumed', 'earth.ocean.current', 'earth.ocean.current.presumed',
+      'earth.ground.friction', 'earth.ground.friction.presumed', 'earth.ground.load', 'earth.ground.load.presumed', 'earth.ground.damping', 'earth.ground.damping.presumed'];
+    assert('fields: the world holds twenty-nine fields, the domains\' models, each with its descriptor', names.every((n) => byName.has(n)) && cat.length === 29, cat.map((f) => f.name).join(', '));
     const moonField = byName.get('moon.magnetic');
     assert('fields: the Moon\'s composite is synthetic, its parts the assimilated model and the synthetic scales, read on spheres row by row',
       !moonField?.available || (moonField.provenance === 'synthetic' && moonField.parts?.map((x) => `${x.name}:${x.provenance}`).join() === 'moon.magnetic.crust:assimilated,moon.magnetic.unresolved:synthetic'
@@ -835,6 +876,119 @@ if (state && state.built && state.data.ephemeris && state.data.moon_magnetic) {
     assert('mission: the whitened innovations, pooled, within their 95 % band', cal.whitened_mean_square > b[0] && cal.whitened_mean_square < b[1], `${cal.whitened_mean_square} in ${b}`);
   }
 } else skip('mission: the engine, the ephemeris or the Moon\'s crustal model is not in the cache (python data/acquisition/fetch.py moon-magnetic-t2015)');
+
+// ---- every field at a point (field.at, decision 0012) -------------------------------------------------------------
+if (state && state.built && state.data.ephemeris) {
+  const ask = (request) => {
+    const r = spawnSync(python, [resolve(APP, 'engine.py'), 'run', '-'], { cwd: ROOT, input: JSON.stringify(request), encoding: 'utf8', timeout: 300000 });
+    try { return JSON.parse(r.stdout); } catch { return { error: (r.stderr || r.stdout || '').slice(-300) }; }
+  };
+  const all = ask({ op: 'fields' });
+  const ice = ask({ op: 'field.at', at: 'earth(68.667 N, 42.967 W, 2600 m)', time: '2026-10-30T12:00:00Z' });
+  if (ice.error || all.error) assert('fields here: every field at a point on the Greenland ice sheet', false, ice.error || all.error);
+  else {
+    assert('fields here: every field of the world is answered, with a value, the reason it has none, or why its model is missing',
+      ice.fields.length === all.fields.length && ice.fields.every((f) => f.missing || (f.quality === 'valid' ? f.value !== undefined : !!f.reason)));
+    const b = ice.fields.find((f) => f.name === 'earth.magnetic');
+    check('fields here: a vector on the local east, north and up keeps its length (WMM2025; relative)', Math.hypot(...b.enu) / b.magnitude - 1, 1e-12);
+    assert('fields here: and points down in the north (its up component negative, its north positive)', b.enu[2] < 0 && b.enu[1] > 0, JSON.stringify(b.enu));
+    const g = ice.fields.find((f) => f.name === 'earth.gravity.normal');
+    assert('fields here: normal gravity points down, about 9.82 m/s² at 68.7° N and 2600 m', g.enu[2] < -9.81 && g.enu[2] > -9.83 && Math.abs(g.enu[0]) < 1e-9, JSON.stringify(g.enu));
+    assert('fields here: the interior has no value in the air, and says so', /air/.test(ice.fields.find((f) => f.name === 'earth.interior.density').reason || ''));
+  }
+}
+
+// ---- a robot: the rabbit on the Moon (engine/robot.hpp, decision 0011) -------------------------------------------
+if (state && state.built) {
+  const ask = (request) => {
+    const r = spawnSync(python, [resolve(APP, 'engine.py'), 'run', '-'], { cwd: ROOT, input: JSON.stringify(request), encoding: 'utf8', timeout: 300000 });
+    try { return JSON.parse(r.stdout); } catch { return { error: (r.stderr || r.stdout || '').slice(-300) }; }
+  };
+  const models = ask({ op: 'robot.models' });
+  const rabbit = models.models?.find((m) => m.model === 'rabbit');
+  if (!rabbit) assert('robot: the catalogue has the rabbit', false, models.error || '');
+  else {
+    assert('robot: the rabbit\'s catalogue: six links, five motors, its feet, a shape for each link',
+      rabbit.links.length === 6 && rabbit.motors.length === 5 && rabbit.feet.some((x) => x.name === 'toe') && rabbit.links.every((l) => l.shape && l.shape.length_m > 0));
+    check('robot: its mass the sum of its links\' (kg)', rabbit.mass_kg - rabbit.links.reduce((a, l) => a + l.mass_kg, 0), 1e-12);
+  }
+  const hop = ask({ op: 'robot.run', config: { body: 'moon', method: 'semi_implicit' }, commands: [{ t_s: 1, behaviour: 'hop', speed_m_s: 0.3, height_m: 0.15 }], seconds: 10 });
+  if (hop.error) assert('robot: a run on the Moon', false, hop.error);
+  else {
+    check('robot: on the Moon its gravity is DE440\'s GM over the radius squared (m/s²)', hop.gravity_m_s2 - 4.9028001e12 / 1737.4e3 ** 2, 1e-12);
+    assert('robot: asked to hop forward, it is not refused, and hops (at least 7 hops in 9 s)', hop.refusals[0] === null && hop.hops >= 7, `${hop.hops} hops`);
+    assert('robot: and goes forward, its speed growing to the 0.3 m/s asked (1.5 to 3 m in 9 s, the launch among them)', hop.distance_m > 1.5 && hop.distance_m < 3.0, `${hop.distance_m} m`);
+    check('robot: its pitch held (rad)', hop.pitch_rad, 0.3);
+    check('robot: its energy accounted for, the residual a fraction of a joule (J)', hop.energy.residual_j, 2);
+    assert('robot: the readings of its motors and feet', hop.joints.length === 5 && hop.feet.length === 7 && hop.energy.electrical_j > 0);
+  }
+  const earth = ask({ op: 'robot.run', config: { body: 'earth', lat_deg: 45 }, commands: [{ t_s: 0.5, behaviour: 'hop', height_m: 0.05 }], seconds: 1.5 });
+  if (earth.error) assert('robot: a run on the Earth', false, earth.error);
+  else {
+    assert('robot: on the Earth the hop is refused, saying why, and it stands', /ankle/.test(earth.refusals[0] || '') && earth.phase === 'standing', earth.refusals[0]);
+    assert('robot: the Earth\'s gravity there the normal gravity of WGS 84 (between the equator\'s and the pole\'s)', earth.gravity_m_s2 > 9.78 && earth.gravity_m_s2 < 9.833, `${earth.gravity_m_s2}`);
+  }
+  // The ground (decision 0012): on the Moon the feet press on the world's regolith and learn it.
+  const moon = ask({ op: 'robot.run', config: { body: 'moon', lat_deg: 7.5, lon_deg: -59.0, azimuth_deg: 90 }, commands: [{ t_s: 1, behaviour: 'hop', speed_m_s: 0.3, height_m: 0.15 }], seconds: 10, reveal: true });
+  if (moon.error) assert('ground: a run on the Moon\'s regolith', false, moon.error);
+  else {
+    const g = moon.ground, b = g.belief_here, t = g.truth_here;
+    assert('ground: on the Moon the robot is told the regolith\'s presumption (the median of tan 30° and tan 50°)', Math.abs(g.presumed.friction - Math.sqrt(Math.tan(Math.PI / 6) * Math.tan(5 * Math.PI / 18))) < 1e-5, `${g.presumed.friction}`);
+    assert('ground: its feet read the friction and the load', g.readings.friction > 3 && g.readings.load > 3, JSON.stringify(g.readings));
+    check('ground: where its toe is, it believes the friction within three of its deviations (|log(belief/truth)| / sd)', Math.abs(Math.log(b.friction / t.friction)) / Math.max(b.friction_log_sd, 1e-3), 3);
+    assert('ground: its readings fit what it was told (the whitened mean squares within a factor of 3 of 1)',
+      ['friction', 'load'].every((k) => g.whitened_mean_square[k] > 1 / 3 && g.whitened_mean_square[k] < 3), JSON.stringify(g.whitened_mean_square));
+    const hidden = ask({ op: 'robot.run', config: { body: 'moon', lat_deg: 7.5, lon_deg: -59.0 }, seconds: 0.5 });
+    assert('ground: unrevealed, no answer carries the truth', !hidden.error && !hidden.ground.truth_here && !hidden.ground.profile.truth_friction);
+  }
+  const start = ask({ op: 'robot.run', config: { body: 'moon', lat_deg: 7.5, lon_deg: -59.0 }, seconds: 0, reveal: true });
+  const here = ask({ op: 'field.at', at: 'moon(7.5 N, 59.0 W)', time: '2026-10-30T12:00:00Z' });
+  if (start.error || here.error) assert('ground: the robot\'s ground and the world\'s field at the site', false, start.error || here.error);
+  else {
+    const f = here.fields.find((x) => x.name === 'moon.ground.friction');
+    check('ground: the ground the robot stands on is the world\'s field moon.ground.friction (its toe 1 cm from the site; relative)', start.ground.truth_here.friction / f.value - 1, 0.01);
+  }
+
+  // The fish (decision 0012 §2.4): in the equatorial Pacific it swims on the world's water; on land it is refused.
+  if (models.models?.some((m) => m.model === 'fish')) {
+    const fish = ask({ op: 'robot.run', config: { model: 'fish', lat_deg: 0, lon_deg: -150, azimuth_deg: 90, method: 'semi_implicit' }, commands: [{ t_s: 0.5, behaviour: 'swim', speed_m_s: 0.15 }], seconds: 15, reveal: true });
+    if (fish.error) assert('fish: a swim in the Pacific', false, fish.error);
+    else {
+      assert('fish: in the equatorial Pacific it swims forward (more than a metre in 15 s)', fish.distance_m > 1.0 && fish.forward_m_s > 0.05, `${fish.distance_m} m`);
+      assert('fish: over the sea CRUST1.0 knows there (thousands of metres of water)', fish.water.sea_depth_m > 1000, `${fish.water.sea_depth_m} m`);
+      const here = ask({ op: 'field.at', at: 'earth(0 N, 150 W, -1 m)', time: '2026-10-30T12:00:00Z' });
+      const rho = here.fields?.find((f) => f.name === 'earth.ocean.density');
+      check('fish: its water is the world\'s field earth.ocean.density there (kg/m³)', rho ? fish.water.truth.density_kg_m3 - rho.value : 1, 1e-6);
+      // semi-implicit Euler's account, of its order: 0.84 J over 15 s, where Runge–Kutta's is 4 mJ (robotics's checks)
+      check('fish: its energy\'s account, semi-implicit Euler\'s, within its order (J, 15 s)', fish.energy.residual_j, 2, 'J');
+    }
+    const land = ask({ op: 'robot.run', config: { model: 'fish', lat_deg: 48.86, lon_deg: 2.35 }, seconds: 1 });
+    assert('fish: in Paris it is refused, the sea\'s depth there named', /needs the sea/.test(land.error || ''), land.error);
+  }
+
+  // The dog (decision 0012 §2.5): on the Greenland ice sheet and in Paris on the world's ground; at sea refused.
+  if (models.models?.some((m) => m.model === 'dog') && state.data.crust1) {
+    const ice = ask({ op: 'robot.run', config: { model: 'dog', lat_deg: 72.6, lon_deg: -38.5, azimuth_deg: 90 }, commands: [{ t_s: 0.5, behaviour: 'trot', speed_m_s: 0.3 }], seconds: 6, reveal: true });
+    if (ice.error) assert('dog: a trot on the Greenland ice sheet', false, ice.error);
+    else {
+      assert('dog: on the Greenland ice sheet its ground is ice, and it is told so (μ 0.15)', ice.ground.class === 'ice' && ice.ground.presumed.friction === 0.15, ice.ground.class);
+      assert('dog: it trots there, level (more than a metre in 5.5 s, its pitch within 5°)', ice.distance_m > 1.0 && Math.abs(ice.pitch_rad) < 5 * Math.PI / 180, `${ice.distance_m} m`);
+      check('dog: its belief of the ice\'s friction at its feet within three of its deviations of the truth', Math.abs(Math.log(ice.ground.belief_here.friction / ice.ground.truth_here.friction)) / Math.max(ice.ground.belief_here.friction_log_sd, 1e-3), 3);
+    }
+    const paris = ask({ op: 'robot.run', config: { model: 'dog', lat_deg: 48.86, lon_deg: 2.35 }, seconds: 0.5, reveal: true });
+    assert('dog: in Paris its ground is sediment', !paris.error && paris.ground.class === 'sediment', paris.error || paris.ground?.class);
+    const here = ask({ op: 'field.at', at: 'earth(48.86 N, 2.35 E)', time: '2026-10-30T12:00:00Z' });
+    const mu = here.fields?.find((f) => f.name === 'earth.ground.friction.presumed');
+    assert('dog: the world\'s field earth.ground.friction.presumed there is sediment\'s median, 0.6', mu?.value === 0.6, JSON.stringify(mu));
+    const sea = ask({ op: 'robot.run', config: { model: 'dog', lat_deg: 0, lon_deg: -150 }, seconds: 0.5 });
+    assert('dog: at sea it is refused, the sea named', /needs ground/.test(sea.error || ''), sea.error);
+  }
+
+  const none = ask({ op: 'robot.step', session: 'nobody', seconds: 1 });
+  assert('robot: stepping a robot never started is refused', /no robot/.test(none.error || ''));
+  const wrong = ask({ op: 'robot.run', config: { method: 'leapfrog' }, seconds: 1 });
+  assert('robot: a method it does not know is refused, saying which it knows', /variational/.test(wrong.error || ''));
+} else skip('robot: the engine is not built');
 
 // ---- the server's runtime, and a session in the engine (tests/check_runtime.py) ------------------------------------
 if (!python) skip('runtime: no Python');

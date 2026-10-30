@@ -11,9 +11,11 @@ README, §5:
     GET  /api/engine                         whether the engine is built and current, and which sources are in the cache
     POST /api/engine                         a request to the engine: {"op": "status" | "time" | "frames" | "ephemeris"
                                              | "bodies" | "transform" | "holonomy" | "convert" | "address" | "geodesic"
-                                             | "satellites" | "instruments" | "fields" | "field.sample" | "field.curves"
+                                             | "satellites" | "instruments" | "fields" | "field.sample" | "field.curves" | "field.at"
                                              | "field_lines" | "field_map" | "probe_volume" | "mission.start" | "mission.step"
-                                             | "mission.state" | "mission.map" | "mission.stop" | "mission.calibrate", ...};
+                                             | "mission.state" | "mission.map" | "mission.stop" | "mission.calibrate"
+                                             | "robot.models" | "robot.start" | "robot.command" | "robot.step"
+                                             | "robot.state" | "robot.stop" | "robot.run", ...};
                                              the server adds the world's sources (and for "satellites" turns "groups"
                                              into the files of their element sets); a field read without a time (one
                                              that does not depend on it) is kept, the last few, as the Moon's maps are
@@ -114,10 +116,16 @@ WRITES = {"allowed": True, "token": None}
 LIMITS = {"bytes": 256 * 1024, "samples": 4000, "positions": 10000, "seconds": 60.0, "max_level": {"earth": 18, "moon": 14},
           "probe": {"n": [2, 24], "edge_m": [1.0, 2e7], "threads": min(8, os.cpu_count() or 4)}}
 OPS = {"status", "time", "frames", "ephemeris", "bodies", "transform", "holonomy", "convert", "address", "geodesic", "satellites", "instruments",
-       "fields", "field.sample", "field.curves", "field_lines", "field_map", "probe_volume", "beneath.section",
-       "mission.start", "mission.step", "mission.state", "mission.map", "mission.stop", "mission.calibrate"}
+       "fields", "field.sample", "field.curves", "field.at", "field_lines", "field_map", "probe_volume", "beneath.section",
+       "mission.start", "mission.step", "mission.state", "mission.map", "mission.stop", "mission.calibrate",
+       "robot.models", "robot.start", "robot.command", "robot.step", "robot.state", "robot.stop", "robot.run"}
 # The missions' requests that change what every viewer sees: allowed as the clock's and the acquisition's are.
 MISSION_WRITES = {"mission.start", "mission.step", "mission.stop"}
+# And the robots' (the engine's robot.hpp): a robot is the engine's, one each session, seen by every viewer.
+ROBOT_WRITES = {"robot.start", "robot.command", "robot.step", "robot.stop"}
+# A robot's bounds in one request: the seconds of its time stepped (its frames come back at 60 a second), and
+# of a session run whole.
+ROBOT_LIMITS = {"seconds": 5.0, "run_seconds": 30.0}
 # A mission's bounds in one request: its clock's step, a map's points a side, a calibration's truths.
 MISSION_LIMITS = {"seconds": 3600.0, "n": 61, "seeds": 24, "calibration_n": 7}
 # The most points a field may be read at in one request, and the most seeds of its curves.
@@ -367,6 +375,28 @@ def mission_refusal(op: str, body: dict) -> str | None:
     return None
 
 
+def robot_refusal(op: str, body: dict) -> str | None:
+    """Why a robot's request is refused, or None."""
+    session = body.get("session", "default")
+    if not isinstance(session, str) or not 0 < len(session) <= 40:
+        return "robot: a session's name, at most 40 characters"
+    try:
+        if op == "robot.step" and not 0 <= float(body.get("seconds", 0)) <= ROBOT_LIMITS["seconds"]:
+            return f"robot.step: at most {ROBOT_LIMITS['seconds']:.0f} s of the robot's time a request"
+        if op == "robot.run" and not 0 <= float(body.get("seconds", 0)) <= ROBOT_LIMITS["run_seconds"]:
+            return f"robot.run: at most {ROBOT_LIMITS['run_seconds']:.0f} s of the robot's time"
+        if op == "robot.run" and not (isinstance(body.get("commands", []), list) and len(body.get("commands", [])) <= 50):
+            return "robot.run: its commands a list, at most 50"
+        for key in ("speed_m_s", "height_m", "since_frame", "since_reading"):
+            if key in body:
+                float(body[key])
+    except (TypeError, ValueError):
+        return f"{op}: its numbers are numbers"
+    if op in ("robot.start", "robot.run") and not isinstance(body.get("config", {}), dict):
+        return f"{op}: a config, as an object"
+    return None
+
+
 def engine_refusal(body: dict) -> str | None:
     """Why a request to the engine is refused, or None."""
     op = body.get("op")
@@ -378,6 +408,10 @@ def engine_refusal(body: dict) -> str | None:
         return section_refusal(body)
     if op.startswith("mission."):
         return mission_refusal(op, body)
+    if op.startswith("robot."):
+        return robot_refusal(op, body)
+    if op == "field.at" and (not isinstance(body.get("at"), str) or not 0 < len(body["at"]) <= 2000):
+        return "field.at: an event, as an address of at most 2000 characters (\"observer\" for the observer)"
     if op == "address" and (not isinstance(body.get("text"), str) or len(body["text"]) > 2000):
         return "address: the text of an address, at most 2000 characters"
     if op in ("ephemeris", "bodies"):
@@ -510,7 +544,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             refusal = engine_refusal(body)
             if refusal:
                 return self.reply_json({"error": refusal}, 400)
-            if body["op"] in MISSION_WRITES:
+            if body["op"] in MISSION_WRITES or body["op"] in ROBOT_WRITES:
                 refusal = write_refusal(self)
                 if refusal:
                     return self.reply_json({"error": refusal}, 403)
@@ -522,6 +556,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 body["files"] = [{"path": str(SATELLITES / g / "gp.tle"), "group": g} for g in body.pop("groups")]
             if body["op"] == "address":
                 body["now_unix"] = time.time()
+            if body["op"] == "field.at":
+                if body["at"].strip() == "observer":
+                    body["at"] = ACQUISITION.world_inputs()["observer"]
+                if not body.get("time") and "@" not in body["at"]:
+                    body["time"] = f"JD {2451545.0 + CLOCK.now() / 86400.0:.10f} TT"
             if body["op"] == "probe_volume":
                 for key in ("session", "elements", "inputs", "now_tt_s", "now_unix", "seed", "threads"):
                     body.pop(key, None)  # the server's to give

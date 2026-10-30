@@ -63,7 +63,7 @@ def include_dirs() -> list[Path]:
     """The include directories of the engine: the domains it stands on, physis, tyche, morphe and calx, the API's C++ and
     the engine's own."""
     dirs: list[Path] = []
-    for domain in ("metrology", "geodesy", "astronomy", "geophysics", "meteorology", "navigation", "planetary-science", "robotics"):
+    for domain in ("metrology", "geodesy", "astronomy", "geophysics", "meteorology", "oceanography", "navigation", "planetary-science", "robotics"):
         dirs += sorted(p for p in ROOT.glob(f"domains/{domain}/*/include") if p.is_dir())
     for pattern in ("foundations/physis/*/include", "foundations/tyche/*/include", "foundations/morphe/*/include",
                     "foundations/calx/numerics/*/include", "foundations/calx/compute/*/include"):
