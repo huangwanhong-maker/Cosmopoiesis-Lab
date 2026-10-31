@@ -77,7 +77,10 @@ export function robotPage(app) {
   // The page as the robot chosen has it: its sites, behaviours, sections and words.
   function applyRobot() {
     if (!el) return;
-    model = models[state.robot] || null;
+    // frames of the robot before are not drawn with this one's links
+    const m = models[state.robot] || null;
+    if (m !== model) { play.clear(); frame = null; }
+    model = m;
     const fish = isFish();
     el.querySelector('#rb-title').innerHTML = fish ? 'The fish <span class="aside">a body with joints, swimming in the ocean</span>'
       : isDog() ? 'The dog <span class="aside">a body with four legs, trotting on the Earth</span>' : 'The rabbit <span class="aside">a body with joints, hopping on the Moon</span>';
@@ -101,7 +104,8 @@ export function robotPage(app) {
 
   function adopt(a, fresh = false) {
     if (!a) return;
-    if (fresh || (robot && a.t_s < robot.t_s - 1e-9)) { play.clear(); residuals.length = 0; readings = []; }
+    // a robot begun again drops the last frame drawn too: another robot's poses do not fit this one's links
+    if (fresh || (robot && a.t_s < robot.t_s - 1e-9)) { play.clear(); residuals.length = 0; readings = []; frame = null; }
     // the engine's robot is the page's: a fish found there makes the page the fish's
     if (a.model && a.model !== state.robot) {
       state.robot = a.model;
@@ -150,7 +154,8 @@ export function robotPage(app) {
     if (!fig) return;
     site.h = groundHeight();
     origin = globe.cartesian(fig, site.lon * DEG, site.lat * DEG, site.h);
-    if (world && world.fish !== site.fish) { app.scene.setObject('robot', null, null, null); world = null; }
+    // the world's body is built for one robot's links: another robot (the dog after the rabbit) is built anew
+    if (world && (world.fish !== site.fish || world.model !== model)) { app.scene.setObject('robot', null, null, null); world = null; }
     if (!world) {
       world = site.fish ? new FishInWorld(model, axes, site.depth) : new RobotInWorld(model, axes);
       world.fish = site.fish;
